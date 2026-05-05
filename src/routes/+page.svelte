@@ -4,6 +4,10 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Resizable from "$lib/components/ui/resizable/index.js";
   import { mode } from "mode-watcher";
+  import { toast } from "svelte-sonner";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import { invoke } from "@tauri-apps/api/core";
   import {
     Card,
     CardContent,
@@ -39,6 +43,36 @@
   async function isWindowsPlatform(params) {
     return (await platform()) === "windows";
   }
+
+  async function openFolder() {
+  const selected = await openDialog({
+    directory: true,
+    multiple: false,
+    title: "Choose a project folder",
+  });
+  if (!selected) return;
+
+  try {
+    const label = `folder-${Date.now()}`;
+    const encoded = encodeURIComponent(selected);
+    const win = new WebviewWindow(label, {
+      url: `app?path=${encoded}`,
+      title: selected.split(/[/\\]/).pop() ?? "Project",
+      width: 1200,
+      height: 800,
+      transparent: true,
+      decorations: false,      
+      resizable: true,
+      focus: true,
+    });
+
+    win.once("tauri://error", (e) => {
+      console.error("Window creation error:", e);
+    });
+  } catch (e) {
+    console.error("Failed to open window:", e);
+  }
+}
 
   function saveStats() {
     localStorage.setItem("ttt_wins", String(wins));
@@ -121,6 +155,7 @@
       gameOver = true;
       wins++;
       saveStats();
+      toast.success("🎉 You won!", { description: "Minimax couldn't stop you!" });
       return;
     }
     if (board.every(Boolean)) {
@@ -128,6 +163,7 @@
       gameOver = true;
       draws++;
       saveStats();
+      toast.info("🤝 It's a draw!", { description: "Neither side could break through." });
       return;
     }
 
@@ -142,11 +178,13 @@
           gameOver = true;
           losses++;
           saveStats();
+          toast.error("🤖 AI wins!", { description: "Better luck next time." });
         } else if (board.every(Boolean)) {
           isDraw = true;
           gameOver = true;
           draws++;
           saveStats();
+          toast.info("🤝 It's a draw!", { description: "Neither side could break through." });
         }
       }
       thinking = false;
@@ -166,6 +204,7 @@
     isDraw = false;
     gameOver = false;
     thinking = false;
+    toast("Game reset", { description: "Board cleared. Your turn! ✕" });
   }
 
   async function learnMore() {
@@ -235,7 +274,7 @@
       {/if}
     </div>
   </header>
-
+  
   <!-- ── PANELS ── -->
   <Resizable.PaneGroup direction="horizontal" class="flex-1 overflow-hidden">
     <!-- LEFT — Empty state -->
@@ -253,7 +292,9 @@
           </Empty.Header>
           <Empty.Content>
             <div class="flex flex-col gap-2 w-full">
-              <Button class="w-full">Open Folder</Button>
+              <Button class="w-full" onclick={openFolder}>
+                Open Folder
+              </Button>
               <Button
                 onclick={learnMore}
                 variant="outline"
