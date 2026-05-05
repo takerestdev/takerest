@@ -11,8 +11,8 @@
   } from "$lib/components/ui/card/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";
   import { FolderOpen, ArrowUpRight } from "@lucide/svelte";
-  import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-
+  import { openPath, openUrl } from "@tauri-apps/plugin-opener"
+  import Themetoggle from "$lib/components/themetoggle.svelte";
   // ── Stats ───────────────────────────────────────────────
   let wins = 0;
   let losses = 0;
@@ -269,7 +269,10 @@
     <div class="w-1/2 flex items-center justify-center p-8">
       <Card class="w-full max-w-xs">
         <CardHeader>
-          <CardTitle>Tic Tac Toe</CardTitle>
+          <CardTitle class="flex items-center justify-between">
+            <p>Tic Tac Toe</p>
+            <Themetoggle/>
+          </CardTitle>
           <CardDescription>{status}</CardDescription>
         </CardHeader>
 
@@ -296,6 +299,7 @@
           <div class="grid grid-cols-3 gap-1.5">
             {#each board as cell, i}
               <button
+                aria-label={`Row ${Math.floor(i / 3) + 1}, column ${(i % 3) + 1}: ${cell ?? "empty"}`}
                 class="h-16 text-2xl font-bold border rounded-md flex items-center justify-center
                        transition-colors hover:bg-muted
                        disabled:opacity-40 disabled:cursor-not-allowed
