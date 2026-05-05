@@ -25,7 +25,6 @@ body {
   -webkit-backdrop-filter: blur(12px);
 }
 
-@custom-variant dark (&:is(.dark *));
 
 :root {
   --background: oklch(98.725% 0.01873 119.904);

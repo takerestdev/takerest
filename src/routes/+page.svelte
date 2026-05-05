@@ -206,6 +206,8 @@
     <div data-tauri-drag-region class="flex items-center justify-end">
       {#if isWindows}
         <button
+          aria-label="Minimize window"
+          type="button"
           class="w-11 h-9 flex items-center justify-center hover:bg-muted transition-colors"
           onclick={() => appWindow.minimize()}
           title="Minimize"
@@ -213,6 +215,8 @@
           <Minus size={14} />
         </button>
         <button
+          aria-label="Maximize window"
+          type="button"
           class="w-11 h-9 flex items-center justify-center hover:bg-muted transition-colors"
           onclick={() => appWindow.toggleMaximize()}
           title="Maximize"
@@ -220,6 +224,8 @@
           <Square size={14} />
         </button>
         <button
+          aria-label="Close window"
+          type="button"
           class="w-11 h-9 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"
           onclick={() => appWindow.close()}
           title="Close"
