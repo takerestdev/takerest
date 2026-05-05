@@ -15,10 +15,19 @@ body {
     font-family: "Geist Mono", monospace !important;
 }
 
-@custom-variant dark (&:is(.dark *));
+:root {
+  background: transparent !important;
+}
+
+body {
+  background: hsl(var(--background) / 0.7) !important; /* 0.7 = 70% opacity */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
 
 :root {
-  --background: oklch(0.9892 0.0054 117.9205);
+  --background: oklch(98.725% 0.01873 119.904);
   --foreground: oklch(0.2077 0.0398 265.7549);
   --card: oklch(1.0000 0 0);
   --card-foreground: oklch(0.2077 0.0398 265.7549);
