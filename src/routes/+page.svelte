@@ -2,6 +2,8 @@
   // @ts-nocheck
   import { onMount } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Resizable from "$lib/components/ui/resizable/index.js";
+  import { mode } from "mode-watcher";
   import {
     Card,
     CardContent,
@@ -11,7 +13,7 @@
   } from "$lib/components/ui/card/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";
   import { FolderOpen, ArrowUpRight } from "@lucide/svelte";
-  import { openPath, openUrl } from "@tauri-apps/plugin-opener"
+  import { openPath, openUrl } from "@tauri-apps/plugin-opener";
   import Themetoggle from "$lib/components/themetoggle.svelte";
   import { Minus, Square, X } from "@lucide/svelte";
   // ── Stats ───────────────────────────────────────────────
@@ -21,23 +23,21 @@
 
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { platform } from "@tauri-apps/plugin-os";
-    import Logo from "$lib/components/logo.svelte";
+  import Logo from "$lib/components/logo.svelte";
 
   let isWindows = false;
   let appWindow;
 
-  
-
-  onMount(() => {
+  onMount(async () => {
     wins = parseInt(localStorage.getItem("ttt_wins") ?? "0");
     losses = parseInt(localStorage.getItem("ttt_losses") ?? "0");
     draws = parseInt(localStorage.getItem("ttt_draws") ?? "0");
     appWindow = getCurrentWindow();
-    isWindows = isWindowsPlatform();
+    isWindows = (await platform()) === "windows";
   });
 
   async function isWindowsPlatform(params) {
-     return (await platform()) === "windows"
+    return (await platform()) === "windows";
   }
 
   function saveStats() {
@@ -169,7 +169,7 @@
   }
 
   async function learnMore() {
-    await openUrl('https://takerest.dev');
+    await openUrl("https://takerest.dev");
   }
 
   // ── Status label ────────────────────────────────────────
@@ -184,19 +184,22 @@
         : "Your turn  ✕";
 </script>
 
-<div class="h-screen w-full flex flex-col bg-background text-foreground">
+<div class="h-screen w-full flex flex-col text-foreground bg-background">
   <!-- ── HEADER ── -->
   <header
     data-tauri-drag-region
-    class="grid grid-cols-3 w-full items-center px-4 py-2.5 border-b shrink-0"
+    class="grid grid-cols-3 w-full items-center border-b shrink-0"
   >
     <!-- Left: empty spacer -->
     <div></div>
 
     <!-- Center: logo + name -->
-    <div data-tauri-drag-region class="flex items-center justify-center gap-2.5">
+    <div
+      data-tauri-drag-region
+      class="flex items-center px-4 py-2.5 justify-center gap-2.5"
+    >
       <Logo />
-      <span class="font-semibold text-sm tracking-tight">takerest.dev</span>
+      <span class="font-semibold text-sm tracking-tight">takerest</span>
     </div>
 
     <!-- Right: Windows controls -->
@@ -228,80 +231,90 @@
   </header>
 
   <!-- ── PANELS ── -->
-  <div class="flex flex-1 overflow-hidden">
+  <Resizable.PaneGroup direction="horizontal" class="flex-1 overflow-hidden">
     <!-- LEFT — Empty state -->
-    <div class="w-1/2 border-r flex items-center justify-center p-8">
-      <Empty.Root class="border border-dashed w-full max-w-sm">
-        <Empty.Header>
-          <Empty.Media variant="icon">
-            <FolderOpen />
-          </Empty.Media>
-          <Empty.Title>No Recent Folders</Empty.Title>
-          <Empty.Description>
-            Open a project folder to get started with your data workflows.
-          </Empty.Description>
-        </Empty.Header>
-        <Empty.Content>
-          <div class="flex flex-col gap-2 w-full">
-            <Button class="w-full">Open Folder</Button>
-            <Button onclick={learnMore} variant="outline" class="w-full gap-1">
-              Learn More <ArrowUpRight class="size-3.5" />
-            </Button>
-          </div>
-        </Empty.Content>
-      </Empty.Root>
-    </div>
+    <Resizable.Pane defaultSize={50} minSize={25}>
+      <div class="h-full flex items-center justify-center p-8 border-r">
+        <Empty.Root class="border border-dashed w-full max-w-sm">
+          <Empty.Header>
+            <Empty.Media variant="icon">
+              <FolderOpen />
+            </Empty.Media>
+            <Empty.Title>No Recent Folders</Empty.Title>
+            <Empty.Description>
+              Open a project folder to get started with your data workflows.
+            </Empty.Description>
+          </Empty.Header>
+          <Empty.Content>
+            <div class="flex flex-col gap-2 w-full">
+              <Button class="w-full">Open Folder</Button>
+              <Button
+                onclick={learnMore}
+                variant="outline"
+                class="w-full gap-1"
+              >
+                Learn More <ArrowUpRight class="size-3.5" />
+              </Button>
+            </div>
+          </Empty.Content>
+        </Empty.Root>
+      </div>
+    </Resizable.Pane>
+
+    <Resizable.Handle withHandle />
 
     <!-- RIGHT — Tic Tac Toe -->
-    <div class="w-1/2 flex items-center justify-center p-8">
-      <Card class="w-full max-w-xs">
-        <CardHeader>
-          <CardTitle class="flex items-center justify-between">
-            <p>Tic Tac Toe</p>
-            <Themetoggle/>
-          </CardTitle>
-          <CardDescription>{status}</CardDescription>
-        </CardHeader>
+    <Resizable.Pane defaultSize={50} minSize={25}>
+      <div class="h-full flex items-center justify-center p-8">
+        <Card class="w-full max-w-xs">
+          <CardHeader>
+            <CardTitle class="flex items-center justify-between">
+              <p>Tic Tac Toe</p>
+              <Themetoggle />
+            </CardTitle>
+            <CardDescription>{status}</CardDescription>
+          </CardHeader>
 
-        <CardContent class="flex flex-col gap-4">
-          <!-- Score row -->
-          <div
-            class="grid grid-cols-3 text-center rounded-lg border divide-x overflow-hidden"
-          >
-            <div class="py-2">
-              <p class="text-lg font-bold text-green-500">{wins}</p>
-              <p class="text-[11px] text-muted-foreground">Wins</p>
+          <CardContent class="flex flex-col gap-4">
+            <!-- Score row -->
+            <div
+              class="grid grid-cols-3 text-center rounded-lg border divide-x overflow-hidden"
+            >
+              <div class="py-2">
+                <p class="text-lg font-bold text-green-500">{wins}</p>
+                <p class="text-[11px] text-muted-foreground">Wins</p>
+              </div>
+              <div class="py-2">
+                <p class="text-lg font-bold text-red-500">{losses}</p>
+                <p class="text-[11px] text-muted-foreground">Losses</p>
+              </div>
+              <div class="py-2">
+                <p class="text-lg font-bold text-yellow-500">{draws}</p>
+                <p class="text-[11px] text-muted-foreground">Draws</p>
+              </div>
             </div>
-            <div class="py-2">
-              <p class="text-lg font-bold text-red-500">{losses}</p>
-              <p class="text-[11px] text-muted-foreground">Losses</p>
-            </div>
-            <div class="py-2">
-              <p class="text-lg font-bold text-yellow-500">{draws}</p>
-              <p class="text-[11px] text-muted-foreground">Draws</p>
-            </div>
-          </div>
 
-          <!-- Board -->
-          <div class="grid grid-cols-3 gap-1.5">
-            {#each board as cell, i}
-              <button
-                aria-label={`Row ${Math.floor(i / 3) + 1}, column ${(i % 3) + 1}: ${cell ?? "empty"}`}
-                class="h-16 text-2xl font-bold border rounded-md flex items-center justify-center
+            <!-- Board -->
+            <div class="grid grid-cols-3 gap-1.5">
+              {#each board as cell, i}
+                <button
+                  aria-label={`Row ${Math.floor(i / 3) + 1}, column ${(i % 3) + 1}: ${cell ?? "empty"}`}
+                  class="h-16 text-2xl font-bold border rounded-md flex items-center justify-center
                        transition-colors hover:bg-muted
                        disabled:opacity-40 disabled:cursor-not-allowed
                        {cell === 'X' ? 'text-blue-500' : 'text-red-400'}"
-                onclick={() => play(i)}
-                disabled={!!cell || gameOver || thinking}
-              >
-                {cell ?? ""}
-              </button>
-            {/each}
-          </div>
+                  onclick={() => play(i)}
+                  disabled={!!cell || gameOver || thinking}
+                >
+                  {cell ?? ""}
+                </button>
+              {/each}
+            </div>
 
-          <Button class="w-full" onclick={reset}>Reset Game</Button>
-        </CardContent>
-      </Card>
-    </div>
-  </div>
+            <Button class="w-full" onclick={reset}>Reset Game</Button>
+          </CardContent>
+        </Card>
+      </div>
+    </Resizable.Pane>
+  </Resizable.PaneGroup>
 </div>

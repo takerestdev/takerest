@@ -5,6 +5,6 @@
 </script>
 
 <ModeWatcher />
-<div class="h-full">
+<div class="h-full bg-transparent">
 	{@render children()}
 </div>
