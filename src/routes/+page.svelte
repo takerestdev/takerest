@@ -45,36 +45,39 @@
   }
 
   async function openFolder() {
-  const selected = await openDialog({
-    directory: true,
-    multiple: false,
-    title: "Choose a project folder",
-  });
-  if (!selected) return;
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Choose a project folder",
+      });
+      if (!selected) return;
+      const label = `folder-${Date.now()}`;
+      const encoded = encodeURIComponent(selected);
+      const win = new WebviewWindow(label, {
+        url: `app?path=${encoded}`,
+        title: selected.split(/[\\/]/).filter(Boolean).pop() ?? "Project",
+        width: 1200,
+        height: 800,
+        transparent: true,
+        decorations: false,
+        resizable: true,
+        focus: true,
+      });
 
-  try {
-    const label = `folder-${Date.now()}`;
-    const encoded = encodeURIComponent(selected);
-    const win = new WebviewWindow(label, {
-      url: `app?path=${encoded}`,
-      title: selected.split(/[/\\]/).pop() ?? "Project",
-      width: 1200,
-      height: 800,
-      transparent: true,
-      decorations: false,      
-      resizable: true,
-      focus: true,
-    });
-
-    win.once("tauri://error", (e) => {
-      console.error("Window creation error:", e);
-      toast.error("Failed to open folder", { description: "Could not create the window." });
-    });
-  } catch (e) {
-    console.error("Failed to open window:", e);
-    toast.error("Failed to open folder", { description: "An unexpected error occurred." });
+      win.once("tauri://error", (e) => {
+        console.error("Window creation error:", e);
+        toast.error("Failed to open folder", {
+          description: "Could not create the window.",
+        });
+      });
+    } catch (e) {
+      console.error("Failed to open window:", e);
+      toast.error("Failed to open folder", {
+        description: "An unexpected error occurred.",
+      });
+    }
   }
-}
 
   function saveStats() {
     localStorage.setItem("ttt_wins", String(wins));
@@ -157,7 +160,9 @@
       gameOver = true;
       wins++;
       saveStats();
-      toast.success("🎉 You won!", { description: "Minimax couldn't stop you!" });
+      toast.success("🎉 You won!", {
+        description: "Minimax couldn't stop you!",
+      });
       return;
     }
     if (board.every(Boolean)) {
@@ -165,7 +170,9 @@
       gameOver = true;
       draws++;
       saveStats();
-      toast.info("🤝 It's a draw!", { description: "Neither side could break through." });
+      toast.info("🤝 It's a draw!", {
+        description: "Neither side could break through.",
+      });
       return;
     }
 
@@ -186,7 +193,9 @@
           gameOver = true;
           draws++;
           saveStats();
-          toast.info("🤝 It's a draw!", { description: "Neither side could break through." });
+          toast.info("🤝 It's a draw!", {
+            description: "Neither side could break through.",
+          });
         }
       }
       thinking = false;
@@ -276,7 +285,7 @@
       {/if}
     </div>
   </header>
-  
+
   <!-- ── PANELS ── -->
   <Resizable.PaneGroup direction="horizontal" class="flex-1 overflow-hidden">
     <!-- LEFT — Empty state -->
@@ -294,9 +303,7 @@
           </Empty.Header>
           <Empty.Content>
             <div class="flex flex-col gap-2 w-full">
-              <Button class="w-full" onclick={openFolder}>
-                Open Folder
-              </Button>
+              <Button class="w-full" onclick={openFolder}>Open Folder</Button>
               <Button
                 onclick={learnMore}
                 variant="outline"
