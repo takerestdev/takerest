@@ -68,9 +68,11 @@
 
     win.once("tauri://error", (e) => {
       console.error("Window creation error:", e);
+      toast.error("Failed to open folder", { description: "Could not create the window." });
     });
   } catch (e) {
     console.error("Failed to open window:", e);
+    toast.error("Failed to open folder", { description: "An unexpected error occurred." });
   }
 }
 
