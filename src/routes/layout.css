@@ -7,6 +7,11 @@
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
 
+html, body {
+  overflow: hidden;
+  height: 100%;
+}
+
 body {
     font-family: "Google Sans", sans-serif;
 }
