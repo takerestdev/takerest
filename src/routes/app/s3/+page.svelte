@@ -7,10 +7,12 @@
   });
 
   const params = useSearchParams(schema, { pushHistory: false });
-  let folderPath = $state(params.path);
+  const folderPath = $derived(params.path);
 </script>
 
-<div class="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
+<div
+  class="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground"
+>
   <p class="text-lg font-semibold text-foreground">Storage (S3)</p>
   <p class="text-sm">{folderPath}</p>
 </div>

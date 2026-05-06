@@ -28,6 +28,9 @@ pub struct ProjectInfo {
 
     /// Dominant file extension in the project, e.g. ".ts", ".py", ".rs"
     pub major_filetype: Option<FiletypeInfo>,
+
+    /// Project metadata from .takerest/README.md, None if not found or invalid
+    pub readme_metadata: Option<ReadmeMetadata>,
 }
 
 #[derive(Serialize)]
@@ -45,6 +48,15 @@ pub struct FiletypeInfo {
     pub extension: String,
     /// Number of files with this extension
     pub count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadmeMetadata {
+    /// Project name from README header
+    pub project_name: String,
+    /// Full content of the README
+    pub content: String,
 }
 
 fn init_config_file(takerest_dir: &Path, project_path: &str) -> Result<(), AppError> {
@@ -83,8 +95,12 @@ pub fn init_project(project_path: String) -> Result<bool, AppError> {
     }
 
     let takerest_dir = root.join(".takerest");
-    if takerest_dir.exists() {
+    if takerest_dir.exists() && takerest_dir.is_dir() {
         Ok(true)
+    } else if takerest_dir.exists() && !takerest_dir.is_dir() {
+        Err(AppError::InvalidPath(
+            ".takerest exists but is not a directory".to_string()
+        ))
     } else {
         fs::create_dir_all(&takerest_dir)?;
         init_config_file(&takerest_dir, &project_path)?;
@@ -141,8 +157,13 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
             env_files.push(rel_path.clone());
         }
 
-        // Check for docker-compose files (filename contains "docker-compose")
-        if file_name.contains("docker-compose") || file_name.contains("compose.y") {
+        // Check for docker-compose files (exact filename matches)
+        let file_name_lower = file_name.to_lowercase();
+        if file_name_lower == "docker-compose.yml"
+            || file_name_lower == "docker-compose.yaml"
+            || file_name_lower == "compose.yml"
+            || file_name_lower == "compose.yaml"
+        {
             compose_files.push(rel_path.clone());
         }
 
@@ -166,12 +187,16 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
     // Git detection — read .git/HEAD directly (no git2 dependency needed)
     let git = detect_git(root);
 
+    // Read README.md metadata from .takerest/ folder
+    let readme_metadata = read_readme_metadata(root);
+
     Ok(ProjectInfo {
         takerest_initialized,
         env_files,
         compose_files,
         git,
         major_filetype,
+        readme_metadata,
     })
 }
 
@@ -179,11 +204,39 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
 
 /// Detect if the folder is a git repo by reading .git/HEAD.
 /// Returns repo name (folder name) and current branch.
+/// Handles worktrees and submodules where .git is a file pointer.
 fn detect_git(root: &Path) -> Option<GitInfo> {
-    let git_dir = root.join(".git");
-    if !git_dir.is_dir() {
+    let git_path = root.join(".git");
+    
+    // Determine the actual git directory
+    let git_dir = if git_path.is_dir() {
+        // Normal git repo
+        git_path
+    } else if git_path.is_file() {
+        // Git worktree or submodule - .git is a file containing "gitdir: <path>"
+        let git_file_content = fs::read_to_string(&git_path).ok()?;
+        let git_file_trimmed = git_file_content.trim();
+        
+        if let Some(gitdir_path) = git_file_trimmed.strip_prefix("gitdir: ") {
+            let gitdir_path = gitdir_path.trim();
+            let resolved_path = if Path::new(gitdir_path).is_absolute() {
+                Path::new(gitdir_path).to_path_buf()
+            } else {
+                // Resolve relative path from root
+                root.join(gitdir_path)
+            };
+            
+            if resolved_path.is_dir() {
+                resolved_path
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    } else {
         return None;
-    }
+    };
 
     let head_path = git_dir.join("HEAD");
     let head_content = fs::read_to_string(&head_path).ok()?;
@@ -202,4 +255,28 @@ fn detect_git(root: &Path) -> Option<GitInfo> {
         .unwrap_or_else(|| "unknown".to_string());
 
     Some(GitInfo { repo_name, branch })
+}
+
+/// Read and parse the .takerest/README.md file for project metadata.
+fn read_readme_metadata(root: &Path) -> Option<ReadmeMetadata> {
+    let readme_path = root.join(".takerest").join("README.md");
+    
+    if !readme_path.is_file() {
+        return None;
+    }
+    
+    let content = fs::read_to_string(&readme_path).ok()?;
+    
+    // Extract project name from the first markdown header (# Project Name)
+    let project_name = content
+        .lines()
+        .find(|line| line.starts_with("# "))
+        .and_then(|line| line.strip_prefix("# "))
+        .map(|name| name.trim().to_string())
+        .unwrap_or_else(|| "Unknown Project".to_string());
+    
+    Some(ReadmeMetadata {
+        project_name,
+        content,
+    })
 }

@@ -32,8 +32,6 @@
     return match ? match[1] : null;
   });
 
-  let encodedPath = $derived(encodeURIComponent(folderPath));
-
   import { onMount } from "svelte";
 
   onMount(async () => {
@@ -51,9 +49,10 @@
     pushHistory: false,
   });
 
-  let folderPath = $state(params.path);
-  let folderName = $state(
-    folderPath.split(/[\\/]/).filter(Boolean).pop() ?? "Project",
+  let folderPath = $derived(params.path);
+  let encodedPath = $derived(encodeURIComponent(folderPath));
+  let folderName = $derived.by(
+    () => folderPath.split(/[\\/]/).filter(Boolean).pop() ?? "Project",
   );
 
   const tabs = [
@@ -182,7 +181,7 @@
 
         <!-- Theme toggle at bottom -->
         <div class="pb-3 pt-1">
-          <Themetoggle />
+          <Themetoggle ghost={true} />
         </div>
       </Tooltip.Provider>
     </aside>

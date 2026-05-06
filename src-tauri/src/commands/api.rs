@@ -272,21 +272,32 @@ pub fn duplicate_request(project_path: String, request_path: String) -> Result<S
 /// Supports nested paths, e.g. "auth/admin" creates auth/admin/ (and auth/ if needed).
 #[tauri::command]
 pub fn create_collection(project_path: String, collection_path: String) -> Result<(), AppError> {
+    // Validate components before touching the filesystem
+    for component in Path::new(&collection_path).components() {
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(AppError::InvalidPath(
+                    "Collection path must be within .takerest/requests/".to_string(),
+                ));
+            }
+            _ => {}
+        }
+    }
+
     let requests_dir = requests_dir_path(&project_path);
     let full_path = requests_dir.join(&collection_path);
 
-    // Basic path traversal protection
     let canonical_requests = requests_dir
         .canonicalize()
         .unwrap_or_else(|_| requests_dir.clone());
-    // Create first so we can canonicalize
     fs::create_dir_all(&full_path)?;
     let canonical_target = full_path
         .canonicalize()
         .unwrap_or_else(|_| full_path.clone());
 
     if !canonical_target.starts_with(&canonical_requests) {
-        // Remove what we just created if it was outside the requests dir
         let _ = fs::remove_dir_all(&full_path);
         return Err(AppError::InvalidPath(
             "Collection path must be within .takerest/requests/".to_string(),
@@ -310,13 +321,25 @@ fn resolve_request_path(project_path: &str, request_path: &str) -> Result<PathBu
     let requests_dir = requests_dir_path(project_path);
     let full_path = requests_dir.join(request_path);
 
-    // Normalize and check the path doesn't escape .takerest/requests/
-    // We check component-level to catch ../../../etc
+    // Reject absolute paths — on Unix a leading '/' becomes RootDir; on Windows
+    // a drive letter becomes Prefix.  Both cause join() to discard requests_dir.
+    if Path::new(request_path).is_absolute() {
+        return Err(AppError::InvalidPath(
+            "Path traversal not allowed in request path".to_string(),
+        ));
+    }
+
+    // Reject ParentDir (..) and, defensively, any RootDir/Prefix component.
     for component in Path::new(request_path).components() {
-        if let std::path::Component::ParentDir = component {
-            return Err(AppError::InvalidPath(
-                "Path traversal not allowed in request path".to_string(),
-            ));
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(AppError::InvalidPath(
+                    "Path traversal not allowed in request path".to_string(),
+                ));
+            }
+            _ => {}
         }
     }
 
@@ -383,14 +406,26 @@ fn serialize_request_file(data: &RequestData) -> Result<String, AppError> {
 /// Quick-parse only the HTTP method from a request file's frontmatter.
 /// Used by get_request_tree to avoid fully parsing every file.
 fn quick_parse_method(content: &str) -> String {
-    // Look for "method: XXX" in the frontmatter without full YAML parsing
+    // Only scan lines that are within the frontmatter block.
+    // A well-formed file starts with "---\n"; the second "---" closes it.
+    if !content.starts_with("---") {
+        return "GET".to_string();
+    }
+
+    let mut seen_opening = false;
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed == "---" && !content.starts_with("---") {
-            // We've hit the end of frontmatter without the opening
-            break;
+        if trimmed == "---" {
+            if !seen_opening {
+                // This is the opening delimiter.
+                seen_opening = true;
+                continue;
+            } else {
+                // This is the closing delimiter — stop scanning.
+                break;
+            }
         }
-        if trimmed.starts_with("method:") {
+        if seen_opening && trimmed.starts_with("method:") {
             return trimmed
                 .strip_prefix("method:")
                 .unwrap_or("")

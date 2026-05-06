@@ -10,18 +10,23 @@
     pushHistory: false,
   });
 
-  let folderPath = $state(params.path);
-  let folderName = $state(
+  let folderPath = $derived(params.path);
+  let folderName = $derived(
     folderPath.split(/[\\/]/).filter(Boolean).pop() ?? "Project",
   );
 
   import { onMount } from "svelte";
 
   onMount(async () => {
-    const info = await scanProject(folderPath);
-    console.log(info);
-    const status = await initProject(folderPath);
-    console.log(status);
+    if (!folderPath) return;
+    try {
+      const info = await scanProject(folderPath);
+      console.log(info);
+      const status = await initProject(folderPath);
+      console.log(status);
+    } catch (error) {
+      console.error("Project initialization/scan failed", error);
+    }
   });
 </script>
 
