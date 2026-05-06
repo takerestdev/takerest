@@ -1,3 +1,7 @@
+mod commands;
+mod error;
+mod utils;
+
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use window_vibrancy::apply_acrylic;
 
@@ -6,18 +10,26 @@ use tauri::TitleBarStyle;
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![
+            // project commands
+            commands::project::init_project,
+            commands::project::scan_project,
+            // api commands
+            commands::api::init_requests_dir,
+            commands::api::get_request_tree,
+            commands::api::read_request,
+            commands::api::create_request,
+            commands::api::update_request,
+            commands::api::delete_request,
+            commands::api::duplicate_request,
+            commands::api::create_collection,
+        ])
         .setup(|app| {
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("takerest")
