@@ -1,0 +1,18 @@
+<script>
+  // @ts-nocheck
+  import { useSearchParams, createSearchParamsSchema } from "runed/kit";
+
+  const schema = createSearchParamsSchema({
+    path: { type: "string", default: "" },
+  });
+
+  const params = useSearchParams(schema, { pushHistory: false });
+  const folderPath = $derived(params.path);
+</script>
+
+<div
+  class="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground"
+>
+  <p class="text-lg font-semibold text-foreground">Storage (S3)</p>
+  <p class="text-sm">{folderPath}</p>
+</div>

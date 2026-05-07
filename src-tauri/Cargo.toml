@@ -26,4 +26,7 @@ tauri-plugin-os = "2"
 tauri-plugin-dialog = "2"
 window-vibrancy = "0.5"
 urlencoding = "2"
+serde_yaml = "0.9"
+ignore = "0.4"
+thiserror = "2"
 
