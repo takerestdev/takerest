@@ -246,9 +246,9 @@
               <GitBranch class="w-4 h-4" />
               <h3 class="text-sm font-semibold">Git Repository</h3>
             </div>
-            <p class="text-2xl font-bold font-mono truncate">{projectInfo.git.repoName}</p>
+            <p class="text-2xl font-bold font-mono truncate">{projectInfo.git?.repoName ?? 'N/A'}</p>
             <p class="text-xs text-muted-foreground mt-1">
-              Branch: <span class="font-mono">{projectInfo.git.branch}</span>
+              Branch: <span class="font-mono">{projectInfo.git?.branch ?? 'N/A'}</span>
             </p>
           </div>
 
@@ -261,8 +261,8 @@
               <h3 class="text-sm font-semibold">Dominant Filetype</h3>
             </div>
             <div class="flex items-baseline gap-2">
-              <p class="text-2xl font-bold font-mono">{projectInfo.majorFiletype.extension}</p>
-              <p class="text-lg text-muted-foreground">×{projectInfo.majorFiletype.count}</p>
+              <p class="text-2xl font-bold font-mono">{projectInfo.majorFiletype?.extension ?? 'N/A'}</p>
+              <p class="text-lg text-muted-foreground">×{projectInfo.majorFiletype?.count ?? 0}</p>
             </div>
             <p class="text-xs text-muted-foreground mt-1">files in project</p>
           </div>
