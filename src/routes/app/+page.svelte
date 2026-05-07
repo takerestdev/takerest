@@ -2,7 +2,7 @@
 // @ts-nocheck
 
   import { useSearchParams, createSearchParamsSchema } from "runed/kit";
-  import { scanProject } from "$lib/commands/project";
+  import { scanProject, saveReadme } from "$lib/commands/project";
   import { fade, fly, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { 
@@ -15,10 +15,15 @@
     Settings,
     Container,
     Eye,
-    Code
+    Code,
+    Edit3,
+    Save,
+    X as XIcon
   } from "@lucide/svelte";
   import { marked } from 'marked';
   import { openUrl } from "@tauri-apps/plugin-opener";
+  
+  import { EdraEditor, EdraToolBar, EdraDragHandleExtended } from '$lib/components/edra/shadcn';
 
   const schema = createSearchParamsSchema({
     path: { type: "string", default: "" },
@@ -36,7 +41,12 @@
   let projectInfo = $state(null);
   let isScanning = $state(false);
   let scanError = $state(null);
-  let readmeView = $state('preview'); // 'preview' | 'raw'
+  let readmeView = $state('preview'); // 'preview' | 'raw' | 'edit'
+  
+  // Editor states
+  let editorContent = $state(null);
+  let editor = $state(null);
+  let isSaving = $state(false);
 
   // Configure marked for better rendering
   marked.setOptions({
@@ -47,13 +57,13 @@
   // Custom renderer
   const renderer = new marked.Renderer();
 
-  // Custom link handler (unchanged)
+  // Custom link handler
   renderer.link = ({ href, title, text }) => {
     const titleAttr = title ? ` title="${title}"` : '';
     return `<a href="${href}"${titleAttr} data-external-link>${text}</a>`;
   };
 
-  // NEW: Custom code block renderer (GitHub-style + padding)
+  // Custom code block renderer (GitHub-style + padding)
   renderer.code = ({ text, lang, escaped }) => {
     const language = lang || '';
     const dataCode = btoa(unescape(encodeURIComponent(text)));
@@ -91,7 +101,7 @@
 
   marked.use({ renderer });
 
-  // Handle clicks on external links (unchanged)
+  // Handle clicks on external links
   function handleReadmeClick(event) {
     const target = event.target;
     if (target.tagName === 'A' && target.hasAttribute('data-external-link')) {
@@ -103,7 +113,7 @@
     }
   }
 
-  // Derived HTML for README preview (so we can react to it)
+  // Derived HTML for README preview
   let renderedReadmeHtml = $derived(
     projectInfo?.rootReadme ? marked.parse(projectInfo.rootReadme) : ''
   );
@@ -116,7 +126,6 @@
       const buttons = document.querySelectorAll('.copy-button');
       
       buttons.forEach((button) => {
-        // Remove any previous listeners (safe)
         button.replaceWith(button.cloneNode(true));
         const freshButton = document.querySelectorAll('.copy-button').item(Array.from(buttons).indexOf(button));
         
@@ -127,11 +136,9 @@
           if (!dataCode) return;
 
           try {
-            // Decode base64 safely
             const codeText = decodeURIComponent(escape(atob(dataCode)));
             await navigator.clipboard.writeText(codeText);
 
-            // Visual feedback: show checkmark
             const originalHTML = freshButton.innerHTML;
             freshButton.innerHTML = `
               <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -147,10 +154,143 @@
           }
         });
       });
-    }, 80); // Tiny delay so DOM has the new HTML
+    }, 80);
 
     return () => clearTimeout(timer);
   });
+
+  // Handle entering edit mode
+  function enterEditMode() {
+    readmeView = 'edit';
+    // Set editor content from current README
+    editorContent = renderedReadmeHtml || '';
+  }
+
+  // Handle canceling edit
+  function cancelEdit() {
+    readmeView = 'preview';
+    editorContent = null;
+  }
+
+  // Handle saving edited content
+  async function handleSave() {
+    if (!editor || !folderPath) return;
+    
+    isSaving = true;
+    
+    try {
+      // Get markdown content from editor
+      const htmlContent = editor.getHTML();
+      
+      // Convert HTML back to markdown (basic conversion)
+      // For better conversion, consider using a library like turndown
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = htmlContent;
+      const markdownContent = convertHtmlToMarkdown(tempDiv);
+      
+      // Save to backend
+      await saveReadme(folderPath, markdownContent);
+      
+      // Refresh project info to show updated content
+      const info = await scanProject(folderPath);
+      projectInfo = info;
+      
+      // Exit edit mode
+      readmeView = 'preview';
+      editorContent = null;
+      
+      console.log("✅ README saved successfully");
+    } catch (error) {
+      console.error("Failed to save README:", error);
+      // You might want to show an error toast here
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  // Basic HTML to Markdown conversion
+  function convertHtmlToMarkdown(element) {
+    let markdown = '';
+    
+    for (const node of element.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        markdown += node.textContent;
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const tag = node.tagName.toLowerCase();
+        
+        switch (tag) {
+          case 'h1':
+            markdown += `# ${node.textContent}\n\n`;
+            break;
+          case 'h2':
+            markdown += `## ${node.textContent}\n\n`;
+            break;
+          case 'h3':
+            markdown += `### ${node.textContent}\n\n`;
+            break;
+          case 'h4':
+            markdown += `#### ${node.textContent}\n\n`;
+            break;
+          case 'h5':
+            markdown += `##### ${node.textContent}\n\n`;
+            break;
+          case 'h6':
+            markdown += `###### ${node.textContent}\n\n`;
+            break;
+          case 'p':
+            markdown += `${convertHtmlToMarkdown(node)}\n\n`;
+            break;
+          case 'strong':
+          case 'b':
+            markdown += `**${node.textContent}**`;
+            break;
+          case 'em':
+          case 'i':
+            markdown += `*${node.textContent}*`;
+            break;
+          case 'code':
+            markdown += `\`${node.textContent}\``;
+            break;
+          case 'pre':
+            const code = node.querySelector('code');
+            markdown += `\`\`\`\n${code ? code.textContent : node.textContent}\n\`\`\`\n\n`;
+            break;
+          case 'a':
+            markdown += `[${node.textContent}](${node.getAttribute('href')})`;
+            break;
+          case 'ul':
+            for (const li of node.querySelectorAll('li')) {
+              markdown += `- ${li.textContent}\n`;
+            }
+            markdown += '\n';
+            break;
+          case 'ol':
+            let index = 1;
+            for (const li of node.querySelectorAll('li')) {
+              markdown += `${index}. ${li.textContent}\n`;
+              index++;
+            }
+            markdown += '\n';
+            break;
+          case 'blockquote':
+            markdown += `> ${convertHtmlToMarkdown(node)}\n\n`;
+            break;
+          case 'br':
+            markdown += '\n';
+            break;
+          default:
+            markdown += convertHtmlToMarkdown(node);
+        }
+      }
+    }
+    
+    return markdown;
+  }
+
+  function onEditorUpdate() {
+    // Optional: handle real-time updates
+    console.log("Editor content updated");
+  }
 
   $effect(() => {
     if (!folderPath) {
@@ -177,7 +317,7 @@
 </script>
 
 <div class="h-screen w-screen flex flex-col overflow-hidden">
-  <!-- Header (unchanged) -->
+  <!-- Header -->
   <div class="border-b px-8 py-6 bg-background">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
@@ -214,9 +354,8 @@
     {:else if projectInfo}
       <div class="max-w-7xl mx-auto space-y-6 pb-8">
         
-        <!-- Top Stats Row (unchanged) -->
+        <!-- Top Stats Row -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <!-- ... same as before ... -->
           <div 
             class="border rounded-lg p-6"
             in:scale={{ duration: 400, delay: 100, easing: quintOut }}
@@ -268,8 +407,8 @@
           </div>
         </div>
 
-        <!-- Config Files Row (unchanged) -->
-        <div 
+        <!-- Config Files Row -->
+        <!-- <div 
           class="grid grid-cols-1 md:grid-cols-2 gap-6"
           in:fly={{ y: 30, duration: 500, delay: 400, easing: quintOut }}
         >
@@ -290,7 +429,7 @@
             <p class="text-4xl font-bold tabular-nums">{projectInfo.composeFiles.length}</p>
             <p class="text-xs text-muted-foreground mt-1">compose files found</p>
           </div>
-        </div>
+        </div> -->
 
         <!-- README Section -->
         <div 
@@ -298,31 +437,63 @@
           in:fly={{ y: 30, duration: 500, delay: 500, easing: quintOut }}
         >
           {#if projectInfo.rootReadme}
-            <!-- Header with Tabs (unchanged) -->
+            <!-- Header with Tabs -->
             <div class="flex items-center justify-between border-b px-6 py-3 bg-muted/30">
               <div class="flex items-center gap-2">
                 <FileText class="w-4 h-4" />
                 <h3 class="text-sm font-semibold">README.md</h3>
               </div>
               
-              <!-- View Toggle -->
-              <div class="inline-flex rounded-md border bg-background p-1">
-                <button
-                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors
-                         {readmeView === 'preview' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
-                  onclick={() => readmeView = 'preview'}
-                >
-                  <Eye class="w-3.5 h-3.5" />
-                  Preview
-                </button>
-                <button
-                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors
-                         {readmeView === 'raw' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
-                  onclick={() => readmeView = 'raw'}
-                >
-                  <Code class="w-3.5 h-3.5" />
-                  Raw
-                </button>
+              <!-- View Toggle & Actions -->
+              <div class="flex items-center gap-2">
+                {#if readmeView === 'edit'}
+                  <!-- Save and Cancel buttons -->
+                  <button
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border bg-background transition-colors hover:bg-muted"
+                    onclick={cancelEdit}
+                    disabled={isSaving}
+                  >
+                    <XIcon class="w-3.5 h-3.5" />
+                    Cancel
+                  </button>
+                  <button
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
+                    onclick={handleSave}
+                    disabled={isSaving}
+                  >
+                    <Save class="w-3.5 h-3.5" />
+                    {isSaving ? 'Saving...' : 'Save'}
+                  </button>
+                {:else}
+                  <!-- View mode buttons -->
+                  <div class="inline-flex rounded-md border bg-background p-1">
+                    <button
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors
+                             {readmeView === 'preview' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+                      onclick={() => readmeView = 'preview'}
+                    >
+                      <Eye class="w-3.5 h-3.5" />
+                      Preview
+                    </button>
+                    <button
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors
+                             {readmeView === 'raw' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+                      onclick={() => readmeView = 'raw'}
+                    >
+                      <Code class="w-3.5 h-3.5" />
+                      Raw
+                    </button>
+                  </div>
+                  
+                  <!-- Edit button -->
+                  <button
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border bg-background transition-colors hover:bg-muted"
+                    onclick={enterEditMode}
+                  >
+                    <Edit3 class="w-3.5 h-3.5" />
+                    Edit
+                  </button>
+                {/if}
               </div>
             </div>
 
@@ -337,9 +508,39 @@
                 >
                   {@html renderedReadmeHtml}
                 </div>
-              {:else}
+              {:else if readmeView === 'raw'}
                 <pre class="bg-muted border border-border rounded-2xl p-6 text-sm font-mono overflow-x-auto whitespace-pre leading-relaxed max-w-full">{projectInfo.rootReadme}</pre>
+              {:else if readmeView === 'edit'}
+                <!-- Edra Editor -->
+                <div class="bg-background rounded-md border min-h-[400px]">
+                  {#if editor && !editor.isDestroyed}
+                    <EdraToolBar
+                      class="bg-secondary/50 flex w-full items-center overflow-x-auto border-b p-0.5"
+                      {editor}
+                    />
+                    <EdraDragHandleExtended {editor} />
+                  {/if}
+                  <EdraEditor
+                    bind:editor
+                    content={editorContent}
+                    class="h-full overflow-y-auto px-6 py-4"
+                    onUpdate={onEditorUpdate}
+                  />
+                </div>
               {/if}
+            </div>
+          {:else}
+            <!-- No README found -->
+            <div class="p-6 text-center text-muted-foreground">
+              <FileText class="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>No .takerest/README.md found</p>
+              <button
+                class="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
+                onclick={enterEditMode}
+              >
+                <Edit3 class="w-3.5 h-3.5" />
+                Create README
+              </button>
             </div>
           {/if}
         </div>

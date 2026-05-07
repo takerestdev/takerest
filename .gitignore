@@ -10,3 +10,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 shhh.md
 plain.md
+
+# .env files
+.env.takerest
+.env.anotherfile

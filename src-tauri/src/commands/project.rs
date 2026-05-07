@@ -211,6 +211,27 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
     })
 }
 
+/// Save the README.md file in .takerest/ folder
+#[tauri::command]
+pub fn save_readme(project_path: String, content: String) -> Result<(), AppError> {
+    
+    let root = Path::new(&project_path);
+    if !root.is_dir() {
+        return Err(AppError::InvalidPath(format!(
+            "Project path is not a directory: {}",
+            project_path
+        )));
+    }
+
+    
+
+    // Write the README.md file
+    let readme_path = root.join("README.md");
+    fs::write(readme_path, content)?;
+    
+    Ok(())
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /// Detect if the folder is a git repo by reading .git/HEAD.
