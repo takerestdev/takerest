@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
@@ -31,6 +32,9 @@ pub struct ProjectInfo {
 
     /// Project metadata from .takerest/README.md, None if not found or invalid
     pub readme_metadata: Option<ReadmeMetadata>,
+    
+    /// Root README.md content from project root, None if not found
+    pub root_readme: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -148,7 +152,12 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
         };
 
         // Skip files inside .takerest/ — those are our own files
-        if rel_path.starts_with(".takerest") {
+        if Path::new(&rel_path)
+            .components()
+            .next()
+            .map(|c| c.as_os_str() == OsStr::new(".takerest"))
+            .unwrap_or(false)
+        {
             continue;
         }
 
@@ -181,7 +190,7 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
     // Find the dominant file extension
     let major_filetype = ext_counts
         .into_iter()
-        .max_by_key(|(_, count)| *count)
+        .max_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)))
         .map(|(extension, count)| FiletypeInfo { extension, count });
 
     // Git detection — read .git/HEAD directly (no git2 dependency needed)
@@ -189,6 +198,7 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
 
     // Read README.md metadata from .takerest/ folder
     let readme_metadata = read_readme_metadata(root);
+    let root_readme = read_root_readme(root);
 
     Ok(ProjectInfo {
         takerest_initialized,
@@ -197,6 +207,7 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
         git,
         major_filetype,
         readme_metadata,
+        root_readme,
     })
 }
 
@@ -255,6 +266,17 @@ fn detect_git(root: &Path) -> Option<GitInfo> {
         .unwrap_or_else(|| "unknown".to_string());
 
     Some(GitInfo { repo_name, branch })
+}
+
+/// Read the README.md file from project root.
+fn read_root_readme(root: &Path) -> Option<String> {
+    let readme_path = root.join("README.md");
+    
+    if !readme_path.is_file() {
+        return None;
+    }
+    
+    fs::read_to_string(&readme_path).ok()
 }
 
 /// Read and parse the .takerest/README.md file for project metadata.

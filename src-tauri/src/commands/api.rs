@@ -343,6 +343,42 @@ fn resolve_request_path(project_path: &str, request_path: &str) -> Result<PathBu
         }
     }
 
+    // ── Canonical containment check (mirrors create_collection) ─────────────
+    // Prevents symlink escapes even after lexical validation.
+    let canonical_requests = requests_dir
+        .canonicalize()
+        .unwrap_or_else(|_| requests_dir.clone());
+
+    let canonical_target = if full_path.exists() {
+        // Target exists → safe to canonicalize directly (used by read/update/delete/duplicate).
+        full_path
+            .canonicalize()
+            .unwrap_or_else(|_| full_path.clone())
+    } else if let Some(parent) = full_path.parent() {
+        if parent.exists() {
+            // Parent exists but file does not (typical create_request case).
+            // Canonicalize parent + re-join filename so any symlinks in the
+            // existing ancestor path are resolved.
+            let canonical_parent = parent
+                .canonicalize()
+                .unwrap_or_else(|_| parent.to_path_buf());
+            let file_name = full_path.file_name().unwrap_or_default();
+            canonical_parent.join(file_name)
+        } else {
+            // Parent does not exist yet → new subtree. Lexical checks already
+            // passed and no symlinks can exist in a non-existent path, so safe.
+            full_path.clone()
+        }
+    } else {
+        full_path.clone()
+    };
+
+    if !canonical_target.starts_with(&canonical_requests) {
+        return Err(AppError::InvalidPath(
+            "Path traversal not allowed in request path".to_string(),
+        ));
+    }
+
     Ok(full_path)
 }
 
@@ -462,25 +498,35 @@ fn build_tree(dir: &Path, requests_root: &Path) -> Result<Vec<RequestTreeNode>, 
             .to_string_lossy()
             .replace('\\', "/");
 
-        if path.is_dir() {
-            let children = build_tree(&path, requests_root)?;
-            folders.push(RequestTreeNode::Folder {
-                name,
-                path: rel_path,
-                children,
-            });
-        } else if path.extension().map_or(false, |ext| ext == "md") {
-            // Only include .md files
-            let content = fs::read_to_string(&path).unwrap_or_default();
-            let method = quick_parse_method(&content);
-            let display_name = name.strip_suffix(".md").unwrap_or(&name).to_string();
+        // ── Symlink-safe check (replaces path.is_dir()) ─────────────────────
+        if let Ok(file_type) = entry.file_type() {
+            if file_type.is_symlink() {
+                continue; // Explicitly ignore symlinks (prevents escape + cycles)
+            }
 
-            files.push(RequestTreeNode::File {
-                name: display_name,
-                path: rel_path,
-                method,
-            });
+            if file_type.is_dir() {
+                let children = build_tree(&path, requests_root)?;
+                folders.push(RequestTreeNode::Folder {
+                    name,
+                    path: rel_path,
+                    children,
+                });
+            } else if file_type.is_file()
+                && path.extension().map_or(false, |ext| ext == "md")
+            {
+                // Only include real .md files (symlink-to-file is already skipped)
+                let content = fs::read_to_string(&path).unwrap_or_default();
+                let method = quick_parse_method(&content);
+                let display_name = name.strip_suffix(".md").unwrap_or(&name).to_string();
+
+                files.push(RequestTreeNode::File {
+                    name: display_name,
+                    path: rel_path,
+                    method,
+                });
+            }
         }
+        // file_type() error → silently skip (matches original error tolerance)
     }
 
     // Folders first, then files (both already sorted alphabetically)

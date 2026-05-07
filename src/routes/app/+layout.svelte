@@ -3,6 +3,7 @@
 
   /** @type {{ data: import('./$types').LayoutData, children: import('svelte').Snippet }} */
   let { data, children } = $props();
+  import { scale } from 'svelte/transition';
   import {
     Minus,
     Square,
@@ -136,6 +137,7 @@
                 null
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground/80'}"
+                
               >
                 <div class="size-7 flex items-center justify-center">
                   <Logo active={activeTab === null} />
@@ -147,36 +149,39 @@
         </Tooltip.Root>
 
         <!-- Tool tabs -->
+        <!-- ONLY replace your <nav> block with this (Svelte 5 + runes friendly) -->
         <nav class="flex flex-col items-center gap-0.5 flex-1 w-full">
-          {#each tabs as tab}
+        {#each tabs as tab, i (tab.id)}
             <Tooltip.Root>
-              <Tooltip.Trigger>
+            <Tooltip.Trigger>
                 {#snippet child({ props })}
-                  <a
+                <a
                     {...props}
                     href="/app/{tab.id}?path={encodedPath}"
                     aria-label={tab.label}
-                    class="w-full h-10 flex items-center justify-center relative transition-colors duration-150 no-underline {activeTab ===
-                    tab.id
-                      ? 'text-foreground'
-                      : 'text-muted-foreground hover:text-foreground/80'}"
-                  >
-                    <!-- Active indicator bar -->
+                    class="w-full h-10 flex items-center justify-center relative transition-colors duration-150 no-underline {activeTab === tab.id ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/80'}"
+                >
+                    <!-- Active indicator -->
                     {#if activeTab === tab.id}
-                      <span
-                        class="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-primary rounded-r"
-                      ></span>
+                    <span class="absolute left-0 top-1.5 bottom-1.5 w-1.25 bg-primary rounded-r"></span>
                     {/if}
+
+                    <!-- Pop animation wrapper -->
+                    <span
+                        class="icon-pop flex items-center justify-center"
+                        style="animation-delay: {i * 42}ms" 
+                    >
                     <tab.icon
-                      size={20}
-                      strokeWidth={activeTab === tab.id ? 2.2 : 1.5}
+                        size={20}
+                        strokeWidth={activeTab === tab.id ? 2.2 : 1.5}
                     />
-                  </a>
+                    </span>
+                </a>
                 {/snippet}
-              </Tooltip.Trigger>
-              <Tooltip.Content side="right">{tab.label}</Tooltip.Content>
+            </Tooltip.Trigger>
+            <Tooltip.Content side="right">{tab.label}</Tooltip.Content>
             </Tooltip.Root>
-          {/each}
+        {/each}
         </nav>
 
         <!-- Theme toggle at bottom -->
@@ -192,3 +197,25 @@
     </main>
   </div>
 </div>
+
+<style>
+  /* ← Replace your existing <style> block with this smoother version */
+  .icon-pop {
+    animation: iconPop 320ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+    /* 
+       - 320ms = noticeably smoother & more premium feel
+       - cubic-bezier = gentle ease-out (very fluid, no harsh stop)
+    */
+  }
+
+  @keyframes iconPop {
+    0% {
+      opacity: 0;
+      transform: scale(0.65);   /* started higher → less "snap", more elegant grow */
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+</style>
