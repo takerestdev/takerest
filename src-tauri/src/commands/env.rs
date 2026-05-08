@@ -165,6 +165,20 @@ pub fn read_env_file(project_path: String, rel_path: String) -> Result<EnvFileCo
     let root = Path::new(&project_path);
     let abs_path = root.join(&rel_path);
 
+    // Safety: validate path traversal using canonicalization
+    let canonical_root = fs::canonicalize(root).map_err(|_| {
+        AppError::InvalidPath("Invalid project path".to_string())
+    })?;
+    let canonical_abs = fs::canonicalize(&abs_path).map_err(|_| {
+        AppError::InvalidPath(format!("File not found: {}", rel_path))
+    })?;
+
+    if !canonical_abs.starts_with(&canonical_root) {
+        return Err(AppError::InvalidPath(
+            "rel_path escapes the project directory".to_string(),
+        ));
+    }
+
     if !abs_path.is_file() {
         return Err(AppError::InvalidPath(format!(
             "File not found: {}",
@@ -188,17 +202,29 @@ pub fn write_env_file(
     let abs_path = root.join(&rel_path);
 
     // Safety: only allow paths that are children of project root
-    if !abs_path.starts_with(root) {
-        return Err(AppError::InvalidPath(
-            "rel_path escapes the project directory".to_string(),
-        ));
-    }
+    let canonical_root = fs::canonicalize(root).map_err(|_| {
+        AppError::InvalidPath("Invalid project path".to_string())
+    })?;
 
+    // For write operations, we need to canonicalize after ensuring parent exists
     if let Some(parent) = abs_path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    println!("Writing to {}: {}", abs_path.display(), content);
+    let canonical_abs = fs::canonicalize(&abs_path).unwrap_or_else(|_| {
+        // If file doesn't exist yet, canonicalize the parent and rejoin filename
+        abs_path
+            .parent()
+            .and_then(|p| fs::canonicalize(p).ok())
+            .map(|p| p.join(abs_path.file_name().unwrap_or_default()))
+            .unwrap_or_else(|| abs_path.clone())
+    });
+
+    if !canonical_abs.starts_with(&canonical_root) {
+        return Err(AppError::InvalidPath(
+            "rel_path escapes the project directory".to_string(),
+        ));
+    }
 
     fs::write(&abs_path, content)?;
     Ok(())
@@ -213,13 +239,6 @@ pub fn create_env_file(
     let root = Path::new(&project_path);
     let rel_path_normalized = payload.rel_path.replace('\\', "/");
     let abs_path = root.join(&rel_path_normalized);
-
-    // Safety check
-    if !abs_path.starts_with(root) {
-        return Err(AppError::InvalidPath(
-            "rel_path escapes the project directory".to_string(),
-        ));
-    }
 
     // Must contain ".env" in filename
     let file_name = abs_path
@@ -240,8 +259,26 @@ pub fn create_env_file(
         )));
     }
 
+    // Safety check using canonicalization
+    let canonical_root = fs::canonicalize(root).map_err(|_| {
+        AppError::InvalidPath("Invalid project path".to_string())
+    })?;
+
+    // Create parent directories before canonicalization
     if let Some(parent) = abs_path.parent() {
         fs::create_dir_all(parent)?;
+    }
+
+    // Canonicalize the parent directory and verify
+    let canonical_parent = abs_path
+        .parent()
+        .and_then(|p| fs::canonicalize(p).ok())
+        .ok_or_else(|| AppError::InvalidPath("Invalid parent directory".to_string()))?;
+
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err(AppError::InvalidPath(
+            "rel_path escapes the project directory".to_string(),
+        ));
     }
 
     fs::write(&abs_path, &payload.content)?;
@@ -270,7 +307,15 @@ pub fn delete_env_file(project_path: String, rel_path: String) -> Result<(), App
     let root = Path::new(&project_path);
     let abs_path = root.join(&rel_path);
 
-    if !abs_path.starts_with(root) {
+    // Safety: validate path traversal using canonicalization
+    let canonical_root = fs::canonicalize(root).map_err(|_| {
+        AppError::InvalidPath("Invalid project path".to_string())
+    })?;
+    let canonical_abs = fs::canonicalize(&abs_path).map_err(|_| {
+        AppError::InvalidPath(format!("File not found: {}", rel_path))
+    })?;
+
+    if !canonical_abs.starts_with(&canonical_root) {
         return Err(AppError::InvalidPath(
             "rel_path escapes the project directory".to_string(),
         ));

@@ -223,10 +223,25 @@ pub fn save_readme(project_path: String, content: String) -> Result<(), AppError
         )));
     }
 
-    
+    let readme_path = root.join("README.md");
+
+    // Safety: Check if the path is a symlink before writing
+    // Using symlink_metadata to avoid following the symlink
+    match fs::symlink_metadata(&readme_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(AppError::InvalidPath(
+                    "Cannot write to README.md: path is a symlink".to_string()
+                ));
+            }
+            // Path exists and is not a symlink - safe to write
+        }
+        Err(_) => {
+            // Path doesn't exist - safe to create and write
+        }
+    }
 
     // Write the README.md file
-    let readme_path = root.join("README.md");
     fs::write(readme_path, content)?;
     
     Ok(())

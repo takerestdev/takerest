@@ -97,7 +97,7 @@
       addToGitignore = true;
 
       // Navigate to the new file
-      goto(`/app/env/${created.relPath}?path=${encodeURIComponent(folderPath)}`);
+      goto(`/app/env/${encodeURIComponent(created.relPath)}?path=${encodeURIComponent(folderPath)}`);
     } catch (e) {
       createError = e?.message ?? String(e);
     } finally {
@@ -165,7 +165,7 @@
                 {#each envFiles as file (file.relPath)}
                     <a
                     class="w-full text-left rounded-md transition-colors"
-                    href={`/app/env/${file.relPath}?path=${encodeURIComponent(folderPath)}`}
+                    href={`/app/env/${encodeURIComponent(file.relPath)}?path=${encodeURIComponent(folderPath)}`}
                     >
                     <div class="flex items-center justify-between gap-2 p-1.5 rounded-md transition-colors group-hover:bg-muted
                     {isActive(file.relPath)
