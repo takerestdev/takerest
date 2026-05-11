@@ -131,12 +131,11 @@
     });
 
     function handleReadmeClick(event) {
-        const target = event.target;
-        if (target.tagName === 'A' && target.hasAttribute('data-external-link')) {
-            event.preventDefault();
-            const href = target.getAttribute('href');
-            if (href) openUrl(href);
-        }
+        const anchor = event.target.closest?.('a[data-external-link]');
+        if (!anchor) return;
+        event.preventDefault();
+        const href = anchor.getAttribute('href');
+        if (href) openUrl(href);
     }
 
     function enterEditMode() {
@@ -152,11 +151,13 @@
 
     async function handleSave() {
         if (!cmEditor || !folderPath) return;
+        const currentFolder = folderPath;
         isSaving = true;
         try {
             const markdownContent = cmEditor.state.doc.toString().trimEnd() + '\n';
-            await saveReadme(folderPath, markdownContent);
-            const info = await scanProject(folderPath);
+            await saveReadme(currentFolder, markdownContent);
+            const info = await scanProject(currentFolder);
+            if (folderPath !== currentFolder) return;
             projectInfo = info;
             readmeView = 'preview';
         } catch (error) {
@@ -205,14 +206,19 @@
 
     $effect(() => {
         if (!folderPath) { projectInfo = null; return; }
+        const currentFolder = folderPath;
         void (async () => {
             isScanning = true;
             scanError = null;
             try {
-                projectInfo = await scanProject(folderPath);
-                workspace.gitInfo = projectInfo.git ?? null;
+                const info = await scanProject(currentFolder);
+                if (folderPath !== currentFolder) return;
+                projectInfo = info;
+                workspace.gitInfo = info.git ?? null;
             }
-            catch (error) { scanError = error; }
+            catch (error) {
+                if (folderPath === currentFolder) scanError = error;
+            }
             finally { isScanning = false; }
         })();
     });

@@ -251,31 +251,33 @@
         {#each workspace.tabs as tab (tab.id)}
           {@const isActive = workspace.activeTabId === tab.id}
           {@const TabIcon = tabTypeIcons[tab.type] ?? FileText}
+          <!-- Wrapper holds active styling; both buttons are siblings (no nested interactives) -->
           <div
-            class="group flex items-stretch shrink-0"
+            class="group flex items-stretch shrink-0 border-r transition-colors
+              {isActive ? 'bg-background -mb-px border-b-2 border-b-primary hover:bg-muted/30' : 'hover:bg-muted/60'}"
             role="none"
             onmousedown={(e) => handleTabMouseDown(e, tab.id)}
           >
             <button
               type="button"
               onclick={() => (workspace.activeTabId = tab.id)}
-              class="flex items-center gap-1.5 px-3 py-2 text-xs border-r transition-colors relative
+              class="flex items-center gap-1.5 pl-3 pr-1 py-2 text-xs transition-colors
                 {isActive
-                  ? 'bg-background text-foreground border-b-2 border-b-primary -mb-px'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'}"
+                  ? 'text-foreground'
+                  : 'text-muted-foreground group-hover:text-foreground'}"
             >
               <TabIcon size={12} strokeWidth={isActive ? 2.2 : 1.5} />
               <span class="max-w-35 truncate">{tab.title}</span>
-              <span
-                role="button"
-                tabindex="0"
-                aria-label="Close tab"
-                class="ml-1 rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted"
-                onclick={(e) => { e.stopPropagation(); workspace.closeTab(tab.id); }}
-                onkeydown={(e) => e.key === 'Enter' && workspace.closeTab(tab.id)}
-              >
-                <X size={11} />
-              </span>
+            </button>
+            <button
+              type="button"
+              aria-label="Close tab"
+              onclick={(e) => { e.stopPropagation(); workspace.closeTab(tab.id); }}
+              onkeydown={(e) => e.key === 'Enter' && workspace.closeTab(tab.id)}
+              class="flex items-center justify-center pr-2 pl-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity
+                {isActive ? 'text-foreground' : 'text-muted-foreground'}"
+            >
+              <X size={11} />
             </button>
           </div>
         {/each}

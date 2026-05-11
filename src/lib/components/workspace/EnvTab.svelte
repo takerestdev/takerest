@@ -18,8 +18,13 @@
     let relPath = $derived(data.relPath);
     let folderPath = $derived(data.folderPath);
 
-    let variables = $state([]);
-    let originalVariables = $state([]);
+    /** @typedef {{ type: 'pair', key: string, value: string }} PairLine */
+    /** @typedef {{ type: 'raw', text: string }} RawLine */
+    /** @typedef {PairLine | RawLine} EnvLine */
+
+    /** @type {EnvLine[]} */
+    let parsedLines = $state([]);
+    let originalContent = $state('');
     let loading = $state(true);
     let saving = $state(false);
     let error = $state('');
@@ -27,24 +32,29 @@
     /** @type {import('$lib/commands/env').EnvFile | null} */
     let fileMeta = $state(null);
 
-    function parseEnv(content) {
+    /** @param {string} content @returns {EnvLine[]} */
+    function parseLines(content) {
         const lines = content.split('\n');
-        const vars = [];
-        for (const line of lines) {
+        if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+        return lines.map(line => {
             const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) continue;
+            if (!trimmed || trimmed.startsWith('#')) return { type: 'raw', text: line };
             const eqIndex = trimmed.indexOf('=');
-            if (eqIndex === -1) continue;
+            if (eqIndex === -1) return { type: 'raw', text: line };
             const key = trimmed.slice(0, eqIndex).trim();
-            const value = trimmed.slice(eqIndex + 1).trim();
-            if (key) vars.push({ key, value });
-        }
-        return vars;
+            if (!key) return { type: 'raw', text: line };
+            const value = trimmed.slice(eqIndex + 1);
+            return { type: 'pair', key, value };
+        });
     }
 
-    function serializeEnv(vars) {
-        return vars.map((v) => `${v.key}=${v.value}`).join('\n') + '\n';
+    /** @param {EnvLine[]} lines @returns {string} */
+    function serializeLines(lines) {
+        if (lines.length === 0) return '';
+        return lines.map(l => l.type === 'pair' ? `${l.key}=${l.value}` : l.text).join('\n') + '\n';
     }
+
+    let pairEntries = $derived(/** @type {PairLine[]} */ (parsedLines.filter(l => l.type === 'pair')));
 
     async function loadFile() {
         if (!folderPath || !relPath) return;
@@ -52,8 +62,8 @@
         error = '';
         try {
             const result = await readEnvFile(folderPath, relPath);
-            variables = parseEnv(result.content);
-            originalVariables = JSON.parse(JSON.stringify(variables));
+            parsedLines = parseLines(result.content);
+            originalContent = serializeLines(parsedLines);
             const allFiles = await listEnvFiles(folderPath);
             fileMeta = allFiles.find((f) => f.relPath === relPath) ?? null;
         } catch (e) {
@@ -69,11 +79,14 @@
 
     async function handleSave() {
         if (!folderPath || !relPath) return;
+        const validLines = parsedLines.filter(l => l.type !== 'pair' || l.key.trim() !== '');
         saving = true;
         error = '';
         try {
-            await writeEnvFile(folderPath, relPath, serializeEnv(variables));
-            originalVariables = JSON.parse(JSON.stringify(variables));
+            const content = serializeLines(validLines);
+            await writeEnvFile(folderPath, relPath, content);
+            parsedLines = validLines;
+            originalContent = content;
         } catch (e) {
             error = e?.message ?? String(e);
         } finally {
@@ -81,12 +94,13 @@
         }
     }
 
-    function addVariable() {
-        variables = [...variables, { key: '', value: '' }];
+    function addPair() {
+        parsedLines = [...parsedLines, { type: 'pair', key: '', value: '' }];
     }
 
-    function deleteVariable(index) {
-        variables = variables.filter((_, i) => i !== index);
+    /** @param {PairLine} entry */
+    function deletePair(entry) {
+        parsedLines = parsedLines.filter(l => l !== entry);
     }
 
     async function handleToggleGitignore() {
@@ -112,16 +126,18 @@
         }
     }
 
-    let isDirty = $derived(JSON.stringify(variables) !== JSON.stringify(originalVariables));
+    let isDirty = $derived(serializeLines(parsedLines) !== originalContent);
 
-    let copiedIndex = $state(-1);
+    /** @type {PairLine | null} */
+    let copiedEntry = $state(null);
     let gitignoreHovering = $state(false);
 
-    async function copyValue(index) {
+    /** @param {PairLine} entry */
+    async function copyValue(entry) {
         try {
-            await navigator.clipboard.writeText(variables[index].value);
-            copiedIndex = index;
-            setTimeout(() => { copiedIndex = -1; }, 1500);
+            await navigator.clipboard.writeText(entry.value);
+            copiedEntry = entry;
+            setTimeout(() => { copiedEntry = null; }, 1500);
         } catch (e) {
             console.error('Copy failed', e);
         }
@@ -212,18 +228,18 @@
                     <div class="w-8"></div>
                     <div class="w-8"></div>
                 </div>
-                {#each variables as variable, index (index)}
+                {#each pairEntries as entry (entry)}
                     <div class="grid grid-cols-[1fr_2fr_auto_auto] gap-2 items-center mb-2 group">
-                        <Input bind:value={variable.key} placeholder="KEY_NAME" class="font-mono" />
-                        <Input bind:value={variable.value} placeholder="value here" class="font-mono" />
+                        <Input bind:value={entry.key} placeholder="KEY_NAME" class="font-mono" />
+                        <Input bind:value={entry.value} placeholder="value here" class="font-mono" />
                         <Button
                             variant="ghost"
                             size="icon"
                             class="text-muted-foreground hover:text-foreground"
                             title="Copy value"
-                            onclick={() => copyValue(index)}
+                            onclick={() => copyValue(entry)}
                         >
-                            {#if copiedIndex === index}
+                            {#if copiedEntry === entry}
                                 <Check class="w-4 h-4 text-green-600" />
                             {:else}
                                 <Copy class="w-4 h-4" />
@@ -233,13 +249,13 @@
                             variant="ghost"
                             size="icon"
                             class="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            onclick={() => deleteVariable(index)}
+                            onclick={() => deletePair(entry)}
                         >
                             <X class="w-4 h-4" />
                         </Button>
                     </div>
                 {/each}
-                <Button variant="outline" onclick={addVariable} class="mt-4 w-full">
+                <Button variant="outline" onclick={addPair} class="mt-4 w-full">
                     <Plus class="w-4 h-4 mr-2" />Add variable
                 </Button>
             </div>
