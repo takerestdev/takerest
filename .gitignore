@@ -14,3 +14,4 @@ plain.md
 # .env files
 .env.takerest
 .env.anotherfile
+.env.ssh
