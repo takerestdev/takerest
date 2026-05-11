@@ -74,9 +74,18 @@
         const lines = md.split('\n');
         const result = [];
         let i = 0;
+        let inFence = false;
+        let fenceChar = '';
         while (i < lines.length) {
             const line = lines[i];
-            if (!line.includes('|')) { result.push(line); i++; continue; }
+            const fenceMatch = line.trim().match(/^(`{3,}|~{3,})/);
+            if (fenceMatch) {
+                const ch = fenceMatch[1][0];
+                if (!inFence) { inFence = true; fenceChar = ch; }
+                else if (ch === fenceChar) { inFence = false; fenceChar = ''; }
+                result.push(line); i++; continue;
+            }
+            if (inFence || !line.includes('|')) { result.push(line); i++; continue; }
             const block = [];
             let j = i;
             while (j < lines.length && lines[j].includes('|')) { block.push(lines[j]); j++; }
@@ -159,6 +168,7 @@
             const info = await scanProject(currentFolder);
             if (folderPath !== currentFolder) return;
             projectInfo = info;
+            workspace.gitInfo = info.git ?? null;
             readmeView = 'preview';
         } catch (error) {
             console.error('Failed to save README:', error);

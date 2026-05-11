@@ -80,13 +80,16 @@
     async function handleSave() {
         if (!folderPath || !relPath) return;
         const validLines = parsedLines.filter(l => l.type !== 'pair' || l.key.trim() !== '');
+        const toSave = serializeLines(validLines);
         saving = true;
         error = '';
         try {
-            const content = serializeLines(validLines);
-            await writeEnvFile(folderPath, relPath, content);
-            parsedLines = validLines;
-            originalContent = content;
+            await writeEnvFile(folderPath, relPath, toSave);
+            originalContent = toSave;
+            // Only remove empty-key rows from parsedLines if user hasn't edited during the save
+            if (serializeLines(parsedLines) === serializeLines(validLines)) {
+                parsedLines = validLines;
+            }
         } catch (e) {
             error = e?.message ?? String(e);
         } finally {
@@ -177,7 +180,7 @@
             <AlertDialog.Root>
                 <AlertDialog.Trigger>
                     {#snippet child({ props })}
-                        <Button {...props} variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                        <Button {...props} variant="ghost" size="icon" aria-label="Delete {relPath}" class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
                             <Trash2 class="w-4 h-4" />
                         </Button>
                     {/snippet}
@@ -235,8 +238,7 @@
                         <Button
                             variant="ghost"
                             size="icon"
-                            class="text-muted-foreground hover:text-foreground"
-                            title="Copy value"
+                            aria-label="Copy value"
                             onclick={() => copyValue(entry)}
                         >
                             {#if copiedEntry === entry}
@@ -248,6 +250,7 @@
                         <Button
                             variant="ghost"
                             size="icon"
+                            aria-label="Delete variable"
                             class="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                             onclick={() => deletePair(entry)}
                         >
