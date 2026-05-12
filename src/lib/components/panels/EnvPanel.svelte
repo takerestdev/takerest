@@ -1,0 +1,191 @@
+<script>
+  // @ts-nocheck
+  import { workspace } from '$lib/stores/workspace.svelte.js';
+  import { listEnvFiles, createEnvFile } from '$lib/commands/env';
+  import { FileLock2, Plus, ShieldCheck, ShieldOff, Loader2, FileKey } from '@lucide/svelte';
+  import { Button } from '$lib/components/ui/button/index.js';
+  import { Input } from '$lib/components/ui/input/index.js';
+  import { Label } from '$lib/components/ui/label/index.js';
+  import { Badge } from '$lib/components/ui/badge/index.js';
+  import { Checkbox } from '$lib/components/ui/checkbox/index.js';
+  import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
+  import * as Dialog from '$lib/components/ui/dialog/index.js';
+
+  let envFiles = $state([]);
+  let listLoading = $state(false);
+  let dialogOpen = $state(false);
+  let newFileSuffix = $state('');
+  let addToGitignore = $state(true);
+  let creating = $state(false);
+  let createError = $state('');
+
+  let newFileName = $derived(
+    newFileSuffix.trim() ? `.env.${newFileSuffix.trim()}` : '.env'
+  );
+
+  $effect(() => {
+    const path = workspace.folderPath;
+    const _ver = workspace.envFilesVersion;
+    if (!path) { envFiles = []; return; }
+    void (async () => {
+      listLoading = true;
+      try { envFiles = await listEnvFiles(path); }
+      catch (e) { console.error('Failed to list env files', e); }
+      finally { listLoading = false; }
+    })();
+  });
+
+  function openEnvFile(file) {
+    workspace.openTab({
+      id: `env::${file.relPath}`,
+      type: 'env-file',
+      title: file.name,
+      data: { relPath: file.relPath, folderPath: workspace.folderPath },
+    });
+  }
+
+  async function handleCreate() {
+    if (!workspace.folderPath) return;
+    createError = '';
+    creating = true;
+    try {
+      const relPath = newFileSuffix.trim() ? `.env.${newFileSuffix.trim()}` : '.env';
+      const created = await createEnvFile(workspace.folderPath, {
+        relPath,
+        content: '',
+        addToGitignore,
+      });
+      workspace.refreshEnvFiles();
+      dialogOpen = false;
+      newFileSuffix = '';
+      addToGitignore = true;
+      openEnvFile(created);
+    } catch (e) {
+      createError = e?.message ?? String(e);
+    } finally {
+      creating = false;
+    }
+  }
+</script>
+
+<div class="h-full flex flex-col overflow-hidden">
+  <!-- Sub-header: count + add -->
+  <div class="flex items-center justify-between px-3 py-2 border-b shrink-0">
+    <div class="flex items-center gap-1.5">
+      <FileKey class="w-3.5 h-3.5 text-muted-foreground" />
+      <span class="text-xs font-medium">Files</span>
+      {#if envFiles.length > 0}
+        <Badge variant="secondary" class="text-xs h-4 px-1.5">{envFiles.length}</Badge>
+      {/if}
+    </div>
+    <Button variant="ghost" size="icon" class="h-6 w-6" onclick={() => (dialogOpen = true)} title="New env file">
+      <Plus class="w-3.5 h-3.5" />
+    </Button>
+  </div>
+
+  <!-- File list -->
+  <ScrollArea class="flex-1">
+    <div class="p-1.5 space-y-px">
+      {#if listLoading}
+        <div class="flex items-center justify-center py-8 text-muted-foreground">
+          <Loader2 class="w-4 h-4 animate-spin mr-2" />
+          <span class="text-xs">Loading...</span>
+        </div>
+      {:else if envFiles.length === 0}
+        <div class="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground px-3">
+          <FileLock2 class="w-7 h-7 opacity-40" />
+          <p class="text-xs text-center">No .env files found.<br />Create one to get started.</p>
+          <Button variant="outline" size="sm" class="text-xs h-7 mt-1" onclick={() => (dialogOpen = true)}>
+            <Plus class="w-3 h-3 mr-1" />New file
+          </Button>
+        </div>
+      {:else}
+        {#each envFiles as file (file.relPath)}
+          {@const isActive = workspace.activeTabId === `env::${file.relPath}`}
+          <button
+            type="button"
+            onclick={() => openEnvFile(file)}
+            class="w-full text-left py-1.5 flex items-center justify-between gap-1 transition-colors relative
+              {isActive
+                ? 'bg-muted text-foreground pl-3 pr-2'
+                : 'hover:bg-muted/60 text-muted-foreground hover:text-foreground px-2'}"
+          >
+            {#if isActive}
+              <span class="absolute left-0 top-1 bottom-1 w-0.5 bg-primary rounded-r"></span>
+            {/if}
+            <span class="font-mono text-xs truncate">{file.name}</span>
+            {#if file.inGitignore}
+              <ShieldCheck class="w-3.5 h-3.5 shrink-0 text-green-600/70" />
+            {:else}
+              <ShieldOff class="w-3.5 h-3.5 shrink-0 opacity-20" />
+            {/if}
+          </button>
+          {#if file.relPath !== file.name}
+            <p class="text-[10px] px-2 pb-0.5 truncate text-muted-foreground">{file.relPath}</p>
+          {/if}
+        {/each}
+      {/if}
+    </div>
+  </ScrollArea>
+
+  <!-- Footer legend -->
+  <div class="px-3 py-1.5 border-t shrink-0">
+    <p class="text-[10px] text-muted-foreground flex items-center gap-1">
+      <ShieldCheck class="w-3 h-3 text-green-600" /> in .gitignore
+    </p>
+  </div>
+</div>
+
+<!-- Create dialog -->
+<Dialog.Root bind:open={dialogOpen}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>New Environment File</Dialog.Title>
+      <Dialog.Description>
+        Create a new <span class="font-mono text-foreground">.env</span> file in your project.
+      </Dialog.Description>
+    </Dialog.Header>
+    <div class="space-y-5 py-2">
+      <div class="space-y-2">
+        <Label>Filename</Label>
+        <div class="flex items-center rounded-md border focus-within:ring-2 focus-within:ring-ring overflow-hidden">
+          <span class="px-3 py-2 text-sm font-mono bg-muted border-r text-muted-foreground select-none">.env.</span>
+          <Input
+            class="border-0 rounded-none shadow-none focus-visible:ring-0 font-mono text-sm"
+            placeholder="local"
+            bind:value={newFileSuffix}
+            onkeydown={(e) => e.key === 'Enter' && handleCreate()}
+            autofocus
+          />
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Will create: <span class="font-mono text-foreground">{newFileName}</span>
+        </p>
+      </div>
+      <div class="flex items-start gap-3">
+        <Checkbox id="gitignore-check" bind:checked={addToGitignore} class="mt-0.5" />
+        <div class="space-y-0.5">
+          <Label for="gitignore-check" class="cursor-pointer">Add to .gitignore</Label>
+          <p class="text-xs text-muted-foreground">Recommended — keeps secrets out of version control.</p>
+        </div>
+      </div>
+      {#if createError}
+        <p class="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
+          {createError}
+        </p>
+      {/if}
+    </div>
+    <Dialog.Footer class="gap-2">
+      <Button variant="outline" onclick={() => { dialogOpen = false; createError = ''; }} disabled={creating}>
+        Cancel
+      </Button>
+      <Button onclick={handleCreate} disabled={creating || !workspace.folderPath}>
+        {#if creating}
+          <Loader2 class="w-3.5 h-3.5 mr-1.5 animate-spin" />Creating...
+        {:else}
+          <Plus class="w-3.5 h-3.5 mr-1.5" />Create
+        {/if}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

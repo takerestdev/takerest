@@ -34,3 +34,14 @@ export async function initProject(projectPath) {
 export async function scanProject(projectPath) {
   return invoke("scan_project", { projectPath });
 }
+
+
+/**
+ * Save the README.md file in .takerest/ folder
+ * @param {string} projectPath - Absolute path to the project folder
+ * @param {string} content - Markdown content to save
+ * @returns {Promise<void>}
+ */
+export async function saveReadme(projectPath, content) {
+  return invoke("save_readme", { projectPath, content });
+}

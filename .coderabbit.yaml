@@ -1,0 +1,4 @@
+reviews:
+  path_filters:
+    - "!src/lib/components/edra/**"
+    - "!src/lib/components/ui/**"

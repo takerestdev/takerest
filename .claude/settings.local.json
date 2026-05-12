@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -l \"api\\\\|env\\\\|db\\\\|kv\\\\|s3\\\\|docker\\\\|git\")",
+      "WebFetch(domain:takerest.dev)"
+    ]
+  }
+}

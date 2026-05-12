@@ -20,6 +20,15 @@ pub fn run() {
             // project commands
             commands::project::init_project,
             commands::project::scan_project,
+            commands::project::save_readme,
+            // env commands
+            commands::env::list_env_files,
+            commands::env::read_env_file,
+            commands::env::write_env_file,
+            commands::env::create_env_file,
+            commands::env::delete_env_file,
+            commands::env::add_env_to_gitignore,
+            commands::env::remove_env_from_gitignore,
             // api commands
             commands::api::init_requests_dir,
             commands::api::get_request_tree,
