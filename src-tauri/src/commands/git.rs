@@ -19,6 +19,7 @@ pub struct FileStatus {
     pub index_status: Option<ChangeKind>,
     pub worktree_status: Option<ChangeKind>,
     pub file_kind: FileKind,
+    pub conflicted: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -313,6 +314,24 @@ pub fn git_status(project_path: String) -> Result<Vec<FileStatus>, AppError> {
 
         let file_kind = classify_path(&path);
 
+        // Detect merge conflicts: UU, AA, DD, AU, UA, DU, UD
+        let conflicted = matches!(
+            (x, y),
+            ('U','U') | ('A','A') | ('D','D') |
+            ('A','U') | ('U','A') | ('D','U') | ('U','D')
+        );
+
+        if conflicted {
+            files.push(FileStatus {
+                path,
+                index_status: None,
+                worktree_status: Some(ChangeKind::Modified),
+                file_kind,
+                conflicted: true,
+            });
+            continue;
+        }
+
         let index_status = match x {
             'A' => Some(ChangeKind::Added),
             'M' => Some(ChangeKind::Modified),
@@ -329,7 +348,7 @@ pub fn git_status(project_path: String) -> Result<Vec<FileStatus>, AppError> {
         };
 
         if index_status.is_some() || worktree_status.is_some() {
-            files.push(FileStatus { path, index_status, worktree_status, file_kind });
+            files.push(FileStatus { path, index_status, worktree_status, file_kind, conflicted: false });
         }
     }
 
@@ -579,7 +598,14 @@ pub fn git_fetch(project_path: String) -> Result<(), AppError> {
 
 #[tauri::command]
 pub fn git_pull(project_path: String) -> Result<(), AppError> {
-    run_git(&project_path, &["pull", "--ff-only"])
+    // Regular merge pull — safe, preserves all commits, shows merge commits in history.
+    // --ff-only was too strict: it rejected any divergent branch, leaving the user stuck.
+    run_git(&project_path, &["pull"])
+}
+
+#[tauri::command]
+pub fn git_merge_abort(project_path: String) -> Result<(), AppError> {
+    run_git(&project_path, &["merge", "--abort"])
 }
 
 #[tauri::command]
@@ -650,7 +676,7 @@ pub fn git_commit_files(project_path: String, hash: String) -> Result<Vec<FileSt
             _ => continue,
         };
         let file_kind = classify_path(&path);
-        files.push(FileStatus { path, index_status: Some(kind), worktree_status: None, file_kind });
+        files.push(FileStatus { path, index_status: Some(kind), worktree_status: None, file_kind, conflicted: false });
     }
     Ok(files)
 }

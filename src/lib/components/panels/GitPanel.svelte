@@ -6,6 +6,7 @@
     gitBranches, gitCheckoutBranch, gitCreateBranch, gitFetch, gitRemoteStatus,
     gitPush, gitPull, gitPublishBranch,
   } from '$lib/commands/git.js';
+  import { ArrowDown as ArrowDownIcon } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
@@ -20,6 +21,10 @@
   let activeTab = $state('changes');
   let projectPath = $derived(workspace.folderPath);
 
+  // Incremented after any state-changing operation to trigger child reloads
+  let refreshTick = $state(0);
+  function bumpRefresh() { refreshTick++; }
+
   // Branch state
   let branchList = $state({ current: '', isDetached: false, branches: [] });
   let remoteStatus = $state({ ahead: 0, behind: 0, remoteName: null, remoteBranch: null });
@@ -27,10 +32,13 @@
   let branchSearch = $state('');
   let fetching = $state(false);
   let fetchError = $state('');
+  let pulling = $state(false);
+  let pullError = $state('');
   let pushing = $state(false);
   let pushError = $state('');
   let publishing = $state(false);
   let publishError = $state('');
+  let pushBehindOpen = $state(false); // warn dialog: need to pull first
 
   // Stash dialog
   let stashOpen = $state(false);
@@ -71,7 +79,20 @@
     finally { fetching = false; }
   }
 
+  async function handlePull() {
+    pulling = true; pullError = '';
+    try {
+      await gitPull(projectPath);
+      await loadRemoteStatus();
+      await loadBranches();
+      bumpRefresh(); // reload history + changes
+    } catch (e) { pullError = e?.message ?? String(e); }
+    finally { pulling = false; }
+  }
+
   async function handlePush() {
+    // Block push when behind — pushing over divergent history risks overwriting remote work
+    if (remoteStatus.behind > 0) { pushBehindOpen = true; return; }
     pushing = true; pushError = '';
     try { await gitPush(projectPath); await loadRemoteStatus(); }
     catch (e) { pushError = e?.message ?? String(e); }
@@ -83,8 +104,14 @@
     try {
       await gitPublishBranch(projectPath, branchList.current);
       await loadRemoteStatus();
+      bumpRefresh();
     } catch (e) { publishError = e?.message ?? String(e); }
     finally { publishing = false; }
+  }
+
+  function onChildCommit() {
+    bumpRefresh();
+    void loadRemoteStatus();
   }
 
   async function handleCheckout(name) {
@@ -243,27 +270,42 @@
     <!-- Remote status row -->
     <div class="flex items-center gap-1.5 min-w-0">
       {#if remoteStatus.remoteName}
-        <!-- Has remote: show ahead/behind + fetch + push -->
+        <!-- Has remote: show ahead/behind + pull + push + fetch -->
         <span class="text-[10px] text-muted-foreground opacity-60 shrink-0">{remoteStatus.remoteName}</span>
         <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           {#if remoteStatus.ahead > 0}
-            <span class="flex items-center gap-0.5"><ArrowUp size={10} />{remoteStatus.ahead}</span>
+            <span class="flex items-center gap-0.5 text-blue-400"><ArrowUp size={10} />{remoteStatus.ahead}</span>
           {/if}
           {#if remoteStatus.behind > 0}
-            <span class="flex items-center gap-0.5"><ArrowDown size={10} />{remoteStatus.behind}</span>
+            <span class="flex items-center gap-0.5 text-amber-400"><ArrowDown size={10} />{remoteStatus.behind}</span>
           {/if}
         </div>
         <div class="flex-1"></div>
-        {#if fetchError || pushError}
-          <span class="text-[10px] text-destructive truncate max-w-20" title={fetchError || pushError}>failed</span>
+        {#if fetchError || pushError || pullError}
+          <span class="text-[10px] text-destructive truncate max-w-20" title={fetchError || pushError || pullError}>failed</span>
+        {/if}
+        {#if remoteStatus.behind > 0}
+          <button
+            type="button"
+            title="Pull {remoteStatus.behind} commit{remoteStatus.behind !== 1 ? 's' : ''} from {remoteStatus.remoteName}"
+            onclick={handlePull}
+            disabled={pulling}
+            class="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50"
+          >
+            {#if pulling}<Loader2 size={9} class="animate-spin" />{:else}<ArrowDown size={10} />{/if}
+            {pulling ? 'Pulling...' : 'Pull'}
+          </button>
         {/if}
         {#if remoteStatus.ahead > 0}
           <button
             type="button"
-            title="Push {remoteStatus.ahead} commit{remoteStatus.ahead !== 1 ? 's' : ''}"
+            title={remoteStatus.behind > 0 ? 'Pull first before pushing' : `Push ${remoteStatus.ahead} commit${remoteStatus.ahead !== 1 ? 's' : ''}`}
             onclick={handlePush}
-            disabled={pushing}
-            class="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            disabled={pushing || pulling}
+            class="flex items-center gap-1 text-[10px] transition-colors disabled:opacity-50
+              {remoteStatus.behind > 0
+                ? 'text-muted-foreground/40 cursor-not-allowed'
+                : 'text-muted-foreground hover:text-foreground'}"
           >
             {#if pushing}<Loader2 size={9} class="animate-spin" />{:else}<ArrowUp size={10} />{/if}
             Push
@@ -273,7 +315,7 @@
           type="button"
           title="Fetch origin"
           onclick={handleFetch}
-          disabled={fetching}
+          disabled={fetching || pulling}
           class="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
         >
           <RefreshCw size={10} class={fetching ? 'animate-spin' : ''} />
@@ -321,10 +363,12 @@
         {projectPath}
         currentBranch={branchList.current}
         onOpenDiff={openDiff}
+        onCommit={onChildCommit}
+        {refreshTick}
       />
     </div>
     <div class="h-full {activeTab === 'history' ? 'block' : 'hidden'}">
-      <GitHistory {projectPath} onOpenCommit={openCommit} />
+      <GitHistory {projectPath} onOpenCommit={openCommit} {refreshTick} />
     </div>
   </div>
 
@@ -421,6 +465,27 @@
         {#if creatingBranch}<Loader2 size={13} class="mr-1.5 animate-spin" />{/if}
         Create branch
       </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<!-- Pull-before-push warning dialog -->
+<Dialog.Root bind:open={pushBehindOpen}>
+  <Dialog.Content class="sm:max-w-sm">
+    <Dialog.Header>
+      <Dialog.Title>Pull before pushing</Dialog.Title>
+      <Dialog.Description>
+        Your branch is {remoteStatus.behind} commit{remoteStatus.behind !== 1 ? 's' : ''} behind
+        <span class="font-mono font-medium text-foreground">{remoteStatus.remoteName}</span>.
+        Push over divergent history can overwrite remote work. Pull first to merge or resolve conflicts, then push.
+      </Dialog.Description>
+    </Dialog.Header>
+    <Dialog.Footer class="flex-col gap-2 sm:flex-col">
+      <Button class="w-full" onclick={async () => { pushBehindOpen = false; await handlePull(); }}>
+        {#if pulling}<Loader2 size={13} class="mr-1.5 animate-spin" />{/if}
+        Pull now
+      </Button>
+      <Button variant="ghost" class="w-full" onclick={() => { pushBehindOpen = false; }}>Cancel</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

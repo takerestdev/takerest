@@ -45,6 +45,7 @@ pub fn run() {
             commands::git::git_checkout_force,
             commands::git::git_fetch,
             commands::git::git_pull,
+            commands::git::git_merge_abort,
             commands::git::git_push,
             commands::git::git_publish_branch,
             commands::git::git_commit_files,

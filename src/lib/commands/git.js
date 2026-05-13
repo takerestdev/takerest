@@ -85,6 +85,11 @@ export async function gitPull(projectPath) {
   return invoke("git_pull", { projectPath });
 }
 
+/** @returns {Promise<void>} */
+export async function gitMergeAbort(projectPath) {
+  return invoke("git_merge_abort", { projectPath });
+}
+
 /**
  * @param {string} projectPath
  * @param {boolean} [force]
@@ -136,7 +141,7 @@ export async function gitRemoteStatus(projectPath) {
 }
 
 /**
- * @typedef {{ path: string, indexStatus: ChangeKind|null, worktreeStatus: ChangeKind|null, fileKind: 'text'|'image'|'binary' }} FileStatus
+ * @typedef {{ path: string, indexStatus: ChangeKind|null, worktreeStatus: ChangeKind|null, fileKind: 'text'|'image'|'binary', conflicted: boolean }} FileStatus
  * @typedef {{ type: 'added'|'modified'|'deleted'|'renamed', from?: string }} ChangeKind
  * @typedef {{ hunks: DiffHunk[], truncated: boolean, totalAdded: number, totalRemoved: number, isBinary: boolean, isImage: boolean }} DiffResult
  * @typedef {{ oldStart: number, oldLines: number, newStart: number, newLines: number, lines: DiffLine[] }} DiffHunk

@@ -1,6 +1,6 @@
 <script>
   // @ts-nocheck
-  let { projectPath, onOpenCommit } = $props();
+  let { projectPath, onOpenCommit, refreshTick } = $props();
 
   import { gitLog } from '$lib/commands/git.js';
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
@@ -11,6 +11,7 @@
   let error = $state('');
 
   $effect(() => {
+    refreshTick; // reload when parent signals commit/pull
     if (!projectPath) return;
     loading = true;
     error = '';

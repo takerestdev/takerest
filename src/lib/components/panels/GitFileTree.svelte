@@ -27,6 +27,10 @@
     renamed:  'text-blue-500',
   };
 
+  function conflictColor(file) {
+    return file.conflicted ? 'bg-red-500' : (DOT_COLOR[statusKind(file)] ?? 'bg-muted-foreground/40');
+  }
+
   function statusKind(file) {
     return file.indexStatus?.type ?? file.worktreeStatus?.type ?? 'modified';
   }
@@ -105,17 +109,17 @@
         <button
           type="button"
           class="flex-1 text-left text-[13px] truncate min-w-0 transition-colors
-            {isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'}
-            {NAME_COLOR[kind] ?? ''}"
+            {file.conflicted ? 'text-red-500 dark:text-red-400' : isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'}
+            {file.conflicted ? '' : NAME_COLOR[kind] ?? ''}"
           onclick={() => onFileClick(file)}
         >
-          {node.name}
+          {node.name}{#if file.conflicted}<span class="ml-1 text-[10px] font-bold opacity-70">!!</span>{/if}
         </button>
 
         <!-- Status dot -->
         <span
-          class="shrink-0 w-2 h-2 rounded-full {DOT_COLOR[kind] ?? 'bg-muted-foreground/40'}"
-          title={kind}
+          class="shrink-0 w-2 h-2 rounded-full {conflictColor(file)}"
+          title={file.conflicted ? 'merge conflict' : kind}
         ></span>
 
         <!-- Checkbox (stage toggle) -->

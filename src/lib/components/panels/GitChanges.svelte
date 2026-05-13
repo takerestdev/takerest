@@ -1,10 +1,10 @@
 <script>
   // @ts-nocheck
-  let { projectPath, currentBranch, onOpenDiff } = $props();
+  let { projectPath, currentBranch, onOpenDiff, onCommit, refreshTick } = $props();
 
   import { workspace } from '$lib/stores/workspace.svelte.js';
   import {
-    gitStatus, gitStageFile, gitUnstageFile, gitStageAll, gitUnstageAll, gitCommit,
+    gitStatus, gitStageFile, gitUnstageFile, gitStageAll, gitUnstageAll, gitCommit, gitMergeAbort,
   } from '$lib/commands/git.js';
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -12,7 +12,7 @@
   import { Textarea } from '$lib/components/ui/textarea/index.js';
   import * as Dialog from '$lib/components/ui/dialog/index.js';
   import GitFileTree from './GitFileTree.svelte';
-  import { Loader2, RefreshCw, CheckSquare, Square } from '@lucide/svelte';
+  import { Loader2, RefreshCw, CheckSquare, Square, AlertTriangle } from '@lucide/svelte';
 
   let files = $state([]);
   let loading = $state(false);
@@ -23,7 +23,10 @@
   let commitError = $state('');
 
   let commitOpen = $state(false);
+  let abortingMerge = $state(false);
   let stagedCount = $derived(files.filter(f => f.indexStatus).length);
+  let conflictCount = $derived(files.filter(f => f.conflicted).length);
+  let inMerge = $derived(conflictCount > 0 || files.some(f => f.conflicted));
   let unstagedCount = $derived(files.filter(f => f.worktreeStatus && !f.indexStatus).length + files.filter(f => f.worktreeStatus && f.indexStatus).length);
   let activeFile = $derived(
     workspace.tabs.find(t => t.id === workspace.activeTabId && t.type === 'git-diff')?.data?.relPath ?? null
@@ -43,6 +46,7 @@
   }
 
   $effect(() => {
+    refreshTick; // reactive dep — reload when parent signals a change
     if (projectPath) void load();
   });
 
@@ -120,6 +124,7 @@
       body = '';
       commitOpen = false;
       await load();
+      onCommit?.();
     } catch (e) {
       commitError = e?.message ?? String(e);
     } finally {
@@ -127,7 +132,15 @@
     }
   }
 
+  async function handleMergeAbort() {
+    abortingMerge = true;
+    try { await gitMergeAbort(projectPath); await load(); }
+    catch (e) { error = e?.message ?? String(e); }
+    finally { abortingMerge = false; }
+  }
+
   function handleFileClick(file) {
+    if (file.conflicted) return; // conflicted files open in system editor, not diff view
     const staged = !!file.indexStatus;
     onOpenDiff(file, staged);
   }
@@ -158,6 +171,27 @@
       </button>
     </div>
   </div>
+
+  <!-- Merge conflict banner -->
+  {#if inMerge}
+    <div class="shrink-0 bg-destructive/10 border-b border-destructive/20 px-3 py-2 space-y-1.5">
+      <div class="flex items-center gap-2">
+        <AlertTriangle size={13} class="shrink-0 text-destructive" />
+        <span class="text-xs font-medium text-destructive">
+          {conflictCount} merge conflict{conflictCount !== 1 ? 's' : ''} — resolve each file, then stage and commit
+        </span>
+      </div>
+      <button
+        type="button"
+        onclick={handleMergeAbort}
+        disabled={abortingMerge}
+        class="text-[11px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 disabled:opacity-50"
+      >
+        {#if abortingMerge}<Loader2 size={10} class="animate-spin" />{/if}
+        Abort merge
+      </button>
+    </div>
+  {/if}
 
   <!-- File tree -->
   <ScrollArea class="flex-1 min-h-0 overflow-hidden">
