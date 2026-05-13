@@ -29,4 +29,7 @@ urlencoding = "2"
 serde_yaml = "0.9"
 ignore = "0.4"
 thiserror = "2"
+gix = { version = "0.70", features = ["status", "blob-diff", "revision", "index"] }
+imara-diff = "0.1"
+base64 = "0.22"
 

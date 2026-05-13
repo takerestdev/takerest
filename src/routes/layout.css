@@ -123,7 +123,7 @@ body {
   --font-sans: Inter, system-ui, sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: JetBrains Mono, monospace;
-  --radius: 1rem;
+  --radius: 0.75rem;
   --shadow-x: 0px;
   --shadow-y: 10px;
   --shadow-blur: 25px;

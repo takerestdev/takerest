@@ -21,6 +21,9 @@ pub enum AppError {
     #[error("Already exists: {0}")]
     AlreadyExists(String),
 
+    #[error("Git error: {0}")]
+    Git(String),
+
     #[error("{0}")]
     Other(String),
 }

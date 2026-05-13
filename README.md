@@ -1,4 +1,4 @@
-# takerest
+# takerest.dev
 
 One app. Every tool a developer needs daily.
 

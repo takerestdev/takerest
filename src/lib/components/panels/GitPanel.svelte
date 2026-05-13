@@ -1,0 +1,455 @@
+<script>
+  // @ts-nocheck
+  import { invoke } from '@tauri-apps/api/core';
+  import { workspace } from '$lib/stores/workspace.svelte.js';
+  import {
+    gitBranches, gitCheckoutBranch, gitCreateBranch, gitFetch, gitRemoteStatus,
+    gitPush, gitPull, gitPublishBranch,
+  } from '$lib/commands/git.js';
+  import { Button } from '$lib/components/ui/button/index.js';
+  import { Input } from '$lib/components/ui/input/index.js';
+  import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
+  import * as Popover from '$lib/components/ui/popover/index.js';
+  import * as Dialog from '$lib/components/ui/dialog/index.js';
+  import GitChanges from './GitChanges.svelte';
+  import GitHistory from './GitHistory.svelte';
+  import {
+    GitBranch, RefreshCw, ArrowUp, ArrowDown, Plus, Check, Loader2, ChevronDown,
+  } from '@lucide/svelte';
+
+  let activeTab = $state('changes');
+  let projectPath = $derived(workspace.folderPath);
+
+  // Branch state
+  let branchList = $state({ current: '', isDetached: false, branches: [] });
+  let remoteStatus = $state({ ahead: 0, behind: 0, remoteName: null, remoteBranch: null });
+  let branchOpen = $state(false);
+  let branchSearch = $state('');
+  let fetching = $state(false);
+  let fetchError = $state('');
+  let pushing = $state(false);
+  let pushError = $state('');
+  let publishing = $state(false);
+  let publishError = $state('');
+
+  // Stash dialog
+  let stashOpen = $state(false);
+  let stashTargetBranch = $state('');
+  let stashError = $state('');
+  let stashBusy = $state(false);
+
+  // New branch dialog
+  let newBranchOpen = $state(false);
+  let newBranchName = $state('');
+  let newBranchBase = $state('');
+  let fromOpen = $state(false);
+  let fromSearch = $state('');
+  let creatingBranch = $state(false);
+  let createBranchError = $state('');
+
+  $effect(() => {
+    if (projectPath) {
+      void loadBranches();
+      void loadRemoteStatus();
+    }
+  });
+
+  async function loadBranches() {
+    try { branchList = await gitBranches(projectPath); }
+    catch (e) { console.error('branches', e); }
+  }
+
+  async function loadRemoteStatus() {
+    try { remoteStatus = await gitRemoteStatus(projectPath); }
+    catch (e) { /* remote may not be configured */ }
+  }
+
+  async function handleFetch() {
+    fetching = true; fetchError = '';
+    try { await gitFetch(projectPath); await loadRemoteStatus(); }
+    catch (e) { fetchError = e?.message ?? String(e); }
+    finally { fetching = false; }
+  }
+
+  async function handlePush() {
+    pushing = true; pushError = '';
+    try { await gitPush(projectPath); await loadRemoteStatus(); }
+    catch (e) { pushError = e?.message ?? String(e); }
+    finally { pushing = false; }
+  }
+
+  async function handlePublish() {
+    publishing = true; publishError = '';
+    try {
+      await gitPublishBranch(projectPath, branchList.current);
+      await loadRemoteStatus();
+    } catch (e) { publishError = e?.message ?? String(e); }
+    finally { publishing = false; }
+  }
+
+  async function handleCheckout(name) {
+    branchOpen = false;
+    try {
+      await gitCheckoutBranch(projectPath, name);
+      await loadBranches();
+      await loadRemoteStatus();
+    } catch (e) {
+      const msg = e?.message ?? String(e);
+      stashTargetBranch = name;
+      stashError = msg.includes('local changes') || msg.includes('overwritten') || msg.includes('Please commit') ? '' : msg;
+      stashOpen = true;
+    }
+  }
+
+  async function handleStashAndSwitch() {
+    stashBusy = true; stashError = '';
+    try {
+      await invoke('git_stash', { projectPath });
+      await gitCheckoutBranch(projectPath, stashTargetBranch);
+      stashOpen = false;
+      await loadBranches(); await loadRemoteStatus();
+    } catch (e) { stashError = e?.message ?? String(e); }
+    finally { stashBusy = false; }
+  }
+
+  async function handleBringChanges() {
+    stashBusy = true; stashError = '';
+    try {
+      await invoke('git_checkout_force', { projectPath, branch: stashTargetBranch });
+      stashOpen = false;
+      await loadBranches(); await loadRemoteStatus();
+    } catch (e) { stashError = e?.message ?? String(e); }
+    finally { stashBusy = false; }
+  }
+
+  function sanitizeBranchName(raw) {
+    return raw
+      .trim()
+      .replace(/\s+/g, '-')               // spaces → hyphens
+      .replace(/[~^:?*[\\]+/g, '')        // strip git-invalid chars
+      .replace(/\.{2,}/g, '.')            // no consecutive dots
+      .replace(/^[.\-]+|[.\-]+$/g, '')    // no leading/trailing dots or hyphens
+      .replace(/-{2,}/g, '-')             // collapse consecutive hyphens
+      .replace(/\/+/g, '/');              // collapse consecutive slashes
+  }
+
+  let sanitizedBranchName = $derived(sanitizeBranchName(newBranchName));
+  let branchNameChanged = $derived(
+    newBranchName.trim() !== '' && sanitizedBranchName !== newBranchName.trim()
+  );
+
+  async function handleCreateBranch() {
+    if (!sanitizedBranchName) return;
+    creatingBranch = true; createBranchError = '';
+    try {
+      await gitCreateBranch(projectPath, sanitizedBranchName, newBranchBase || undefined);
+      await handleCheckout(sanitizedBranchName);
+      newBranchOpen = false; newBranchName = ''; newBranchBase = '';
+    } catch (e) { createBranchError = e?.message ?? String(e); }
+    finally { creatingBranch = false; }
+  }
+
+  // Filter out HEAD pointers (origin/HEAD etc.) — they're refs, not real branches
+  let allBranches = $derived(branchList.branches.filter(b => !b.name.endsWith('/HEAD')));
+
+  let filteredBranches = $derived(
+    allBranches.filter(b => !branchSearch || b.name.toLowerCase().includes(branchSearch.toLowerCase()))
+  );
+
+  // Branches available as "From" base when creating new branch
+  let fromBranches = $derived(
+    allBranches.filter(b => !fromSearch || b.name.toLowerCase().includes(fromSearch.toLowerCase()))
+  );
+
+  function openDiff(file, staged) {
+    const tabId = `git-diff::${file.path}::${staged ? 'staged' : 'unstaged'}`;
+    workspace.openTab({
+      id: tabId,
+      type: 'git-diff',
+      title: file.path.split('/').pop(),
+      data: { relPath: file.path, staged, folderPath: projectPath, fileKind: file.fileKind },
+    });
+  }
+
+  function openCommit(commit) {
+    workspace.openTab({
+      id: `git-commit::${commit.hash}`,
+      type: 'git-commit',
+      title: commit.shortHash,
+      data: { commit, folderPath: projectPath },
+    });
+  }
+</script>
+
+<div class="h-full flex flex-col overflow-hidden">
+
+  <!-- Branch header -->
+  <div class="px-2 py-2 border-b shrink-0 space-y-1.5">
+    <!-- Branch selector -->
+    <Popover.Root bind:open={branchOpen}>
+      <Popover.Trigger>
+        {#snippet child({ props })}
+          <button
+            {...props}
+            type="button"
+            class="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md border hover:bg-muted/50 transition-colors text-xs"
+          >
+            <GitBranch size={12} class="shrink-0 text-muted-foreground" />
+            <span class="flex-1 text-left truncate font-medium">
+              {branchList.current || '—'}
+            </span>
+            <ChevronDown size={11} class="shrink-0 text-muted-foreground" />
+          </button>
+        {/snippet}
+      </Popover.Trigger>
+      <Popover.Content class="w-64 p-0" align="start">
+        <div class="p-2 border-b">
+          <Input
+            placeholder="Filter branches..."
+            bind:value={branchSearch}
+            class="h-7 text-xs"
+            autofocus
+          />
+        </div>
+        <ScrollArea class="max-h-56">
+          <div class="p-1">
+            {#each filteredBranches as b (b.name)}
+              <button
+                type="button"
+                class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-muted transition-colors"
+                onclick={() => handleCheckout(b.name)}
+              >
+                <GitBranch size={11} class="shrink-0 text-muted-foreground" />
+                <span class="flex-1 truncate {b.isRemote ? 'text-muted-foreground' : ''}">{b.name}</span>
+                {#if b.name === branchList.current}
+                  <Check size={11} class="shrink-0 text-primary" />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        </ScrollArea>
+        <div class="p-1 border-t">
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+            onclick={() => { branchOpen = false; newBranchOpen = true; newBranchBase = branchList.current; fromSearch = ''; }}
+          >
+            <Plus size={11} class="shrink-0" />New branch
+          </button>
+        </div>
+      </Popover.Content>
+    </Popover.Root>
+
+    <!-- Remote status row -->
+    <div class="flex items-center gap-1.5 min-w-0">
+      {#if remoteStatus.remoteName}
+        <!-- Has remote: show ahead/behind + fetch + push -->
+        <span class="text-[10px] text-muted-foreground opacity-60 shrink-0">{remoteStatus.remoteName}</span>
+        <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          {#if remoteStatus.ahead > 0}
+            <span class="flex items-center gap-0.5"><ArrowUp size={10} />{remoteStatus.ahead}</span>
+          {/if}
+          {#if remoteStatus.behind > 0}
+            <span class="flex items-center gap-0.5"><ArrowDown size={10} />{remoteStatus.behind}</span>
+          {/if}
+        </div>
+        <div class="flex-1"></div>
+        {#if fetchError || pushError}
+          <span class="text-[10px] text-destructive truncate max-w-20" title={fetchError || pushError}>failed</span>
+        {/if}
+        {#if remoteStatus.ahead > 0}
+          <button
+            type="button"
+            title="Push {remoteStatus.ahead} commit{remoteStatus.ahead !== 1 ? 's' : ''}"
+            onclick={handlePush}
+            disabled={pushing}
+            class="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {#if pushing}<Loader2 size={9} class="animate-spin" />{:else}<ArrowUp size={10} />{/if}
+            Push
+          </button>
+        {/if}
+        <button
+          type="button"
+          title="Fetch origin"
+          onclick={handleFetch}
+          disabled={fetching}
+          class="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={10} class={fetching ? 'animate-spin' : ''} />
+          {fetching ? 'Fetching...' : 'Fetch'}
+        </button>
+      {:else}
+        <!-- No remote: show publish button -->
+        <div class="flex-1"></div>
+        {#if publishError}
+          <span class="text-[10px] text-destructive truncate max-w-28" title={publishError}>publish failed</span>
+        {/if}
+        <button
+          type="button"
+          onclick={handlePublish}
+          disabled={publishing || !branchList.current}
+          class="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          {#if publishing}<Loader2 size={9} class="animate-spin" />{:else}<ArrowUp size={10} />{/if}
+          {publishing ? 'Publishing...' : 'Publish branch'}
+        </button>
+      {/if}
+    </div>
+  </div>
+
+  <!-- Sub-tabs -->
+  <div class="flex border-b shrink-0">
+    {#each [['changes', 'Changes'], ['history', 'History']] as [id, label]}
+      <button
+        type="button"
+        onclick={() => (activeTab = id)}
+        class="flex-1 py-1.5 text-xs font-medium transition-colors
+          {activeTab === id
+            ? 'text-foreground border-b-2 border-primary -mb-px'
+            : 'text-muted-foreground hover:text-foreground'}"
+      >
+        {label}
+      </button>
+    {/each}
+  </div>
+
+  <!-- Tab content -->
+  <div class="flex-1 overflow-hidden">
+    <div class="h-full {activeTab === 'changes' ? 'block' : 'hidden'}">
+      <GitChanges
+        {projectPath}
+        currentBranch={branchList.current}
+        onOpenDiff={openDiff}
+      />
+    </div>
+    <div class="h-full {activeTab === 'history' ? 'block' : 'hidden'}">
+      <GitHistory {projectPath} onOpenCommit={openCommit} />
+    </div>
+  </div>
+
+</div>
+
+<!-- New branch dialog -->
+<Dialog.Root bind:open={newBranchOpen}>
+  <Dialog.Content class="sm:max-w-sm">
+    <Dialog.Header>
+      <Dialog.Title>New Branch</Dialog.Title>
+    </Dialog.Header>
+    <div class="space-y-3 py-1">
+      <div class="space-y-1.5">
+        <label class="text-xs font-medium">Branch name</label>
+        <Input
+          placeholder="feature/my-branch"
+          bind:value={newBranchName}
+          class="text-sm"
+          autofocus
+          onkeydown={(e) => e.key === 'Enter' && handleCreateBranch()}
+        />
+        {#if branchNameChanged}
+          <p class="text-[11px] text-muted-foreground flex items-center gap-1">
+            Will be created as
+            <span class="font-mono bg-muted px-1 py-0.5 rounded text-foreground">{sanitizedBranchName}</span>
+          </p>
+        {/if}
+      </div>
+      <div class="space-y-1.5">
+        <label class="text-xs font-medium">From</label>
+        <!-- Popover-based branch picker -->
+        <Popover.Root bind:open={fromOpen}>
+          <Popover.Trigger>
+            {#snippet child({ props })}
+              <button
+                {...props}
+                type="button"
+                class="w-full flex items-center gap-2 px-3 h-9 rounded-md border bg-background text-sm hover:bg-muted/50 transition-colors"
+              >
+                <GitBranch size={13} class="shrink-0 text-muted-foreground" />
+                <span class="flex-1 text-left truncate">{newBranchBase || 'Select base branch…'}</span>
+                <ChevronDown size={13} class="shrink-0 text-muted-foreground" />
+              </button>
+            {/snippet}
+          </Popover.Trigger>
+          <Popover.Content class="w-72 p-0" align="start">
+            <div class="p-2 border-b">
+              <Input
+                placeholder="Filter..."
+                bind:value={fromSearch}
+                class="h-7 text-xs"
+                autofocus
+              />
+            </div>
+            <ScrollArea class="max-h-48">
+              <div class="p-1">
+                {#each fromBranches.filter(b => !b.isRemote) as b (b.name)}
+                  <button
+                    type="button"
+                    class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-muted transition-colors"
+                    onclick={() => { newBranchBase = b.name; fromOpen = false; }}
+                  >
+                    <GitBranch size={12} class="shrink-0 text-muted-foreground" />
+                    <span class="flex-1 truncate">{b.name}</span>
+                    {#if b.name === newBranchBase}<Check size={11} class="shrink-0 text-primary" />{/if}
+                  </button>
+                {/each}
+                {#if fromBranches.some(b => b.isRemote)}
+                  <div class="px-2 py-1 text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Remote</div>
+                  {#each fromBranches.filter(b => b.isRemote) as b (b.name)}
+                    <button
+                      type="button"
+                      class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-muted transition-colors"
+                      onclick={() => { newBranchBase = b.name; fromOpen = false; }}
+                    >
+                      <GitBranch size={12} class="shrink-0 text-muted-foreground opacity-60" />
+                      <span class="flex-1 truncate text-muted-foreground">{b.name}</span>
+                      {#if b.name === newBranchBase}<Check size={11} class="shrink-0 text-primary" />{/if}
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            </ScrollArea>
+          </Popover.Content>
+        </Popover.Root>
+      </div>
+      {#if createBranchError}
+        <p class="text-xs text-destructive">{createBranchError}</p>
+      {/if}
+    </div>
+    <Dialog.Footer class="gap-2">
+      <Button variant="outline" onclick={() => { newBranchOpen = false; createBranchError = ''; }}>Cancel</Button>
+      <Button onclick={handleCreateBranch} disabled={!sanitizedBranchName || creatingBranch}>
+        {#if creatingBranch}<Loader2 size={13} class="mr-1.5 animate-spin" />{/if}
+        Create branch
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<!-- Stash / bring changes dialog -->
+<Dialog.Root bind:open={stashOpen}>
+  <Dialog.Content class="sm:max-w-sm">
+    <Dialog.Header>
+      <Dialog.Title>Uncommitted changes</Dialog.Title>
+      <Dialog.Description>
+        You have local changes. What would you like to do before switching to
+        <span class="font-mono font-medium text-foreground">{stashTargetBranch}</span>?
+      </Dialog.Description>
+    </Dialog.Header>
+    {#if stashError}
+      <p class="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded px-3 py-2">{stashError}</p>
+    {/if}
+    <Dialog.Footer class="flex-col gap-2 sm:flex-col">
+      <Button class="w-full" onclick={handleBringChanges} disabled={stashBusy}>
+        {#if stashBusy}<Loader2 size={13} class="mr-1.5 animate-spin" />{/if}
+        Bring my changes to {stashTargetBranch}
+      </Button>
+      <Button variant="outline" class="w-full" onclick={handleStashAndSwitch} disabled={stashBusy}>
+        {#if stashBusy}<Loader2 size={13} class="mr-1.5 animate-spin" />{/if}
+        Stash changes &amp; switch
+      </Button>
+      <Button variant="ghost" class="w-full" onclick={() => { stashOpen = false; stashError = ''; }} disabled={stashBusy}>
+        Cancel
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

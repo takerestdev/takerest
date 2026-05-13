@@ -22,9 +22,13 @@
 
   import EnvPanel from '$lib/components/panels/EnvPanel.svelte';
   import ApiPanel from '$lib/components/panels/ApiPanel.svelte';
+  import GitPanel from '$lib/components/panels/GitPanel.svelte';
   import StubPanel from '$lib/components/panels/StubPanel.svelte';
   import ReadmeTab from '$lib/components/workspace/ReadmeTab.svelte';
   import EnvTab from '$lib/components/workspace/EnvTab.svelte';
+  import DiffTab from '$lib/components/workspace/DiffTab.svelte';
+  import ImageDiffTab from '$lib/components/workspace/ImageDiffTab.svelte';
+  import CommitTab from '$lib/components/workspace/CommitTab.svelte';
 
   let isWindows = $state(false);
   let appWindow;
@@ -69,7 +73,8 @@
     s3: 'Storage', git: 'Git', docker: 'Docker', env: 'Env Files',
   };
 
-  const tabTypeIcons = { readme: FileText, 'env-file': FileKey };
+  import { GitBranch as GitBranchIcon, GitCommit } from '@lucide/svelte';
+  const tabTypeIcons = { readme: FileText, 'env-file': FileKey, 'git-diff': GitBranchIcon, 'git-commit': GitCommit };
 
   let activeTab = $derived(workspace.tabs.find(t => t.id === workspace.activeTabId) ?? null);
 
@@ -217,6 +222,8 @@
                 <EnvPanel />
               {:else if workspace.activeTool === 'api'}
                 <ApiPanel />
+              {:else if workspace.activeTool === 'git'}
+                <GitPanel />
               {:else}
                 <StubPanel tool={workspace.activeTool} />
               {/if}
@@ -292,6 +299,14 @@
             <ReadmeTab data={tab.data} />
           {:else if tab.type === 'env-file'}
             <EnvTab data={tab.data} tabId={tab.id} />
+          {:else if tab.type === 'git-diff'}
+            {#if tab.data.fileKind === 'image'}
+              <ImageDiffTab data={tab.data} />
+            {:else}
+              <DiffTab data={tab.data} />
+            {/if}
+          {:else if tab.type === 'git-commit'}
+            <CommitTab data={tab.data} />
           {/if}
         </div>
       {/each}
