@@ -215,6 +215,7 @@
     });
 
     $effect(() => {
+        workspace.fileChangeTicks['README.md']; // reload when README.md changes on disk
         if (!folderPath) { projectInfo = null; return; }
         const currentFolder = folderPath;
         void (async () => {

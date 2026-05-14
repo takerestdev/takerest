@@ -8,6 +8,8 @@ function createWorkspace() {
   let folderPath = $state('');
   let envFilesVersion = $state(0);
   let gitInfo = $state(null);
+  let fileChangeTicks = $state({});
+  let gitRefreshTick = $state(0);
 
   return {
     get activeTool() { return activeTool; },
@@ -28,6 +30,9 @@ function createWorkspace() {
 
     get gitInfo() { return gitInfo; },
     set gitInfo(v) { gitInfo = v; },
+
+    get fileChangeTicks() { return fileChangeTicks; },
+    get gitRefreshTick() { return gitRefreshTick; },
 
     openTab(tab) {
       const existing = tabs.find(t => t.id === tab.id);
@@ -62,6 +67,14 @@ function createWorkspace() {
 
     refreshEnvFiles() {
       envFilesVersion++;
+    },
+
+    bumpFileTick(rel) {
+      fileChangeTicks[rel] = (fileChangeTicks[rel] ?? 0) + 1;
+    },
+
+    bumpGit() {
+      gitRefreshTick++;
     },
   };
 }

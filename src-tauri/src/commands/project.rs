@@ -44,6 +44,10 @@ pub struct GitInfo {
     pub repo_name: String,
     /// Current branch name (or detached HEAD hash)
     pub branch: String,
+    /// True if this path is a git worktree (not the main worktree)
+    pub is_worktree: bool,
+    /// Worktree name if is_worktree is true
+    pub worktree_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -255,26 +259,30 @@ pub fn save_readme(project_path: String, content: String) -> Result<(), AppError
 fn detect_git(root: &Path) -> Option<GitInfo> {
     let git_path = root.join(".git");
     
-    // Determine the actual git directory
-    let git_dir = if git_path.is_dir() {
-        // Normal git repo
-        git_path
+    // Determine the actual git directory; track whether this is a linked worktree
+    let (git_dir, is_worktree) = if git_path.is_dir() {
+        (git_path, false)
     } else if git_path.is_file() {
-        // Git worktree or submodule - .git is a file containing "gitdir: <path>"
+        // Git worktree or submodule — .git is a file containing "gitdir: <path>"
         let git_file_content = fs::read_to_string(&git_path).ok()?;
         let git_file_trimmed = git_file_content.trim();
-        
+
         if let Some(gitdir_path) = git_file_trimmed.strip_prefix("gitdir: ") {
             let gitdir_path = gitdir_path.trim();
             let resolved_path = if Path::new(gitdir_path).is_absolute() {
                 Path::new(gitdir_path).to_path_buf()
             } else {
-                // Resolve relative path from root
                 root.join(gitdir_path)
             };
-            
+
             if resolved_path.is_dir() {
-                resolved_path
+                // Linked worktrees live under .git/worktrees/<name>; check immediate parent only
+                let is_linked = resolved_path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n == "worktrees")
+                    .unwrap_or(false);
+                (resolved_path, is_linked)
             } else {
                 return None;
             }
@@ -292,7 +300,6 @@ fn detect_git(root: &Path) -> Option<GitInfo> {
     let branch = if let Some(ref_path) = head_trimmed.strip_prefix("ref: refs/heads/") {
         ref_path.to_string()
     } else {
-        // Detached HEAD — show short hash
         head_trimmed.chars().take(8).collect()
     };
 
@@ -301,7 +308,14 @@ fn detect_git(root: &Path) -> Option<GitInfo> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    Some(GitInfo { repo_name, branch })
+    // Worktree name = the folder name of the linked worktree git dir
+    let worktree_name = if is_worktree {
+        git_dir.file_name().map(|n| n.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    Some(GitInfo { repo_name, branch, is_worktree, worktree_name })
 }
 
 /// Read the README.md file from project root.
