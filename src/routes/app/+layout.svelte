@@ -59,6 +59,8 @@
       const allPaths = [...(modified ?? []), ...(created ?? []), ...(deleted ?? [])];
 
       let gitBumped = false;
+      let worktreeBumped = false;
+      let fileTickCount = 0;
       for (const rel of allPaths) {
         if (
           rel === '.git/HEAD' ||
@@ -69,7 +71,11 @@
         ) {
           if (!gitBumped) { workspace.bumpGit(); gitBumped = true; }
         } else if (!rel.startsWith('.git/')) {
-          workspace.bumpFileTick(rel);
+          // Cap per-file ticks so mass changes (thousands of files) don't
+          // flood Svelte's reactivity. DiffTab / ReadmeTab still refresh
+          // via worktreeChangeTick for the common single-file-save case.
+          if (fileTickCount < 20) { workspace.bumpFileTick(rel); fileTickCount++; }
+          if (!worktreeBumped) { workspace.bumpWorktree(); worktreeBumped = true; }
         }
       }
     }).then(unlisten => {

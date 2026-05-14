@@ -4,7 +4,7 @@
   import { workspace } from '$lib/stores/workspace.svelte.js';
   import {
     gitBranches, gitCheckoutBranch, gitCreateBranch, gitFetch, gitRemoteStatus,
-    gitPush, gitPull, gitPublishBranch,
+    gitPush, gitPull, gitPublishBranch, gitDeleteBranch,
   } from '$lib/commands/git.js';
   import { ArrowDown as ArrowDownIcon } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -15,7 +15,7 @@
   import GitChanges from './GitChanges.svelte';
   import GitHistory from './GitHistory.svelte';
   import {
-    GitBranch, RefreshCw, ArrowUp, ArrowDown, Plus, Check, Loader2, ChevronDown,
+    GitBranch, RefreshCw, ArrowUp, ArrowDown, Plus, Check, Loader2, ChevronDown, Trash2,
   } from '@lucide/svelte';
 
   let activeTab = $state('changes');
@@ -45,6 +45,11 @@
   let stashTargetBranch = $state('');
   let stashError = $state('');
   let stashBusy = $state(false);
+
+  // Delete branch
+  let deletingBranch = $state('');  // branch name being confirmed
+  let deleteError = $state('');
+  let deleteBusy = $state(false);
 
   // New branch dialog
   let newBranchOpen = $state(false);
@@ -150,6 +155,23 @@
     finally { stashBusy = false; }
   }
 
+  async function handleDeleteBranch(name, force = false) {
+    deleteBusy = true;
+    deleteError = '';
+    try {
+      await gitDeleteBranch(projectPath, name, force);
+      deletingBranch = '';
+      await loadBranches();
+    } catch (e) {
+      const msg = e?.message ?? String(e);
+      deleteError = (msg.includes('not fully merged') || msg.includes('not fully-merged'))
+        ? 'unmerged'
+        : msg;
+    } finally {
+      deleteBusy = false;
+    }
+  }
+
   function sanitizeBranchName(raw) {
     return raw
       .trim()
@@ -242,17 +264,76 @@
         <ScrollArea class="max-h-56">
           <div class="p-1">
             {#each filteredBranches as b (b.name)}
-              <button
-                type="button"
-                class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-muted transition-colors"
-                onclick={() => handleCheckout(b.name)}
-              >
-                <GitBranch size={11} class="shrink-0 text-muted-foreground" />
-                <span class="flex-1 truncate {b.isRemote ? 'text-muted-foreground' : ''}">{b.name}</span>
-                {#if b.name === branchList.current}
-                  <Check size={11} class="shrink-0 text-primary" />
+              {@const isCurrentOrRemote = b.isRemote || b.name === branchList.current}
+              {@const isDeleting = deletingBranch === b.name}
+              <div class="group/branch flex items-center rounded text-xs hover:bg-muted transition-colors" role="none">
+                <!-- Checkout button (whole row except delete zone) -->
+                <button
+                  type="button"
+                  class="flex-1 flex items-center gap-2 px-2 py-1.5 min-w-0"
+                  onclick={() => { deletingBranch = ''; deleteError = ''; handleCheckout(b.name); }}
+                >
+                  <GitBranch size={11} class="shrink-0 text-muted-foreground" />
+                  <span class="flex-1 truncate {b.isRemote ? 'text-muted-foreground' : ''}">{b.name}</span>
+                  {#if b.name === branchList.current}
+                    <Check size={11} class="shrink-0 text-primary" />
+                  {/if}
+                </button>
+
+                <!-- Delete zone (local non-current branches only) -->
+                {#if !isCurrentOrRemote}
+                  {#if isDeleting}
+                    {#if deleteError === 'unmerged'}
+                      <div class="flex items-center gap-1 pr-1.5 shrink-0">
+                        <span class="text-[10px] text-muted-foreground">Unmerged.</span>
+                        <button
+                          type="button"
+                          class="text-[10px] text-destructive font-medium hover:underline disabled:opacity-50"
+                          onclick={() => handleDeleteBranch(b.name, true)}
+                          disabled={deleteBusy}
+                        >Force?</button>
+                        <button
+                          type="button"
+                          class="text-[10px] text-muted-foreground hover:text-foreground"
+                          onclick={() => { deletingBranch = ''; deleteError = ''; }}
+                        >Cancel</button>
+                      </div>
+                    {:else if deleteError}
+                      <div class="flex items-center gap-1 pr-1.5 shrink-0">
+                        <span class="text-[10px] text-destructive truncate max-w-24" title={deleteError}>Error</span>
+                        <button
+                          type="button"
+                          class="text-[10px] text-muted-foreground hover:text-foreground"
+                          onclick={() => { deletingBranch = ''; deleteError = ''; }}
+                        >✕</button>
+                      </div>
+                    {:else}
+                      <div class="flex items-center gap-1 pr-1.5 shrink-0">
+                        <button
+                          type="button"
+                          class="text-[10px] text-destructive font-medium hover:underline disabled:opacity-50"
+                          onclick={() => handleDeleteBranch(b.name)}
+                          disabled={deleteBusy}
+                        >{deleteBusy ? '…' : 'Delete?'}</button>
+                        <button
+                          type="button"
+                          class="text-[10px] text-muted-foreground hover:text-foreground"
+                          onclick={() => { deletingBranch = ''; deleteError = ''; }}
+                        >Cancel</button>
+                      </div>
+                    {/if}
+                  {:else}
+                    <button
+                      type="button"
+                      aria-label="Delete {b.name}"
+                      class="opacity-0 group-hover/branch:opacity-100 p-1 mr-1 rounded text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                      onclick={(e) => { e.stopPropagation(); deletingBranch = b.name; deleteError = ''; }}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  {/if}
                 {/if}
-              </button>
+              </div>
             {/each}
           </div>
         </ScrollArea>
