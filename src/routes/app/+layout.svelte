@@ -7,6 +7,8 @@
   import { useSearchParams, createSearchParamsSchema } from 'runed/kit';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { platform } from '@tauri-apps/plugin-os';
+  import { listen } from '@tauri-apps/api/event';
+  import { watchProject, unwatchProject } from '$lib/commands/watcher.js';
 
   import {
     Minus, Square, X,
@@ -40,6 +42,47 @@
 
   // Keep workspace in sync with URL path
   $effect(() => { workspace.folderPath = folderPath; });
+
+  // File system watcher lifecycle
+  $effect(() => {
+    const path = folderPath;
+    if (!path) return;
+
+    let stopped = false;
+    let cleanupListen;
+
+    void watchProject(path).catch(console.error);
+
+    void listen('fs:changed', (event) => {
+      if (stopped) return;
+      const { modified, created, deleted } = event.payload;
+      const allPaths = [...(modified ?? []), ...(created ?? []), ...(deleted ?? [])];
+
+      let gitBumped = false;
+      for (const rel of allPaths) {
+        if (
+          rel === '.git/HEAD' ||
+          rel === '.git/index' ||
+          rel === '.git/COMMIT_EDITMSG' ||
+          rel === '.git/packed-refs' ||
+          rel.startsWith('.git/refs/')
+        ) {
+          if (!gitBumped) { workspace.bumpGit(); gitBumped = true; }
+        } else if (!rel.startsWith('.git/')) {
+          workspace.bumpFileTick(rel);
+        }
+      }
+    }).then(unlisten => {
+      if (stopped) { unlisten(); return; }
+      cleanupListen = unlisten;
+    });
+
+    return () => {
+      stopped = true;
+      cleanupListen?.();
+      void unwatchProject().catch(console.error);
+    };
+  });
 
   // Auto-open README tab on first load
   $effect(() => {

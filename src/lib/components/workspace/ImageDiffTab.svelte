@@ -66,16 +66,24 @@
         <!-- Only new image -->
         <div class="flex flex-col items-center gap-2">
           <p class="text-xs text-green-600 font-medium">Added</p>
-          <img src={dataUrl(afterBlob)} alt="Added" class="max-w-full max-h-[70vh] object-contain rounded border shadow-sm" />
+          {#if afterBlob}
+            <img src={dataUrl(afterBlob)} alt="Added" class="max-w-full max-h-[70vh] object-contain rounded border shadow-sm" />
+          {:else}
+            <div class="flex items-center justify-center h-32 border rounded text-muted-foreground text-xs">Not available</div>
+          {/if}
         </div>
       {:else if changeKind === 'deleted'}
         <!-- Only old image with red overlay -->
         <div class="flex flex-col items-center gap-2">
           <p class="text-xs text-red-500 font-medium">Deleted</p>
-          <div class="relative inline-block">
-            <img src={dataUrl(beforeBlob)} alt="Deleted" class="max-w-full max-h-[70vh] object-contain rounded border shadow-sm opacity-60" />
-            <div class="absolute inset-0 bg-red-500/10 rounded border border-red-500/30"></div>
-          </div>
+          {#if beforeBlob}
+            <div class="relative inline-block">
+              <img src={dataUrl(beforeBlob)} alt="Deleted" class="max-w-full max-h-[70vh] object-contain rounded border shadow-sm opacity-60" />
+              <div class="absolute inset-0 bg-red-500/10 rounded border border-red-500/30"></div>
+            </div>
+          {:else}
+            <div class="flex items-center justify-center h-32 border rounded text-muted-foreground text-xs">Not available</div>
+          {/if}
         </div>
       {:else}
         <!-- Before / After side by side -->

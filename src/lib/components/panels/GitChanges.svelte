@@ -22,6 +22,8 @@
   let committing = $state(false);
   let commitError = $state('');
 
+  let _reqId = 0;
+
   let commitOpen = $state(false);
   let abortingMerge = $state(false);
   let stagedCount = $derived(files.filter(f => f.indexStatus).length);
@@ -34,14 +36,22 @@
 
   async function load() {
     if (!projectPath) return;
+    const id = ++_reqId;
     loading = true;
     error = '';
     try {
-      files = await gitStatus(projectPath);
+      const result = await gitStatus(projectPath);
+      if (id !== _reqId) return; // stale response — a newer load is in flight
+      files = result;
+      // Close git-diff tabs for files that are no longer changed (but keep git-commit tabs)
+      const openPaths = new Set(files.map(f => f.path));
+      workspace.tabs
+        .filter(t => t.type === 'git-diff' && !openPaths.has(t.data?.relPath))
+        .forEach(t => workspace.closeTab(t.id));
     } catch (e) {
-      error = e?.message ?? String(e);
+      if (id === _reqId) error = e?.message ?? String(e);
     } finally {
-      loading = false;
+      if (id === _reqId) loading = false;
     }
   }
 
@@ -95,23 +105,47 @@
   let tree = $derived(buildTree(files));
 
   async function handleToggle(file, shouldStage) {
+    // Optimistic update for instant visual feedback
+    files = files.map(f => {
+      if (f.path !== file.path) return f;
+      return shouldStage
+        ? { ...f, indexStatus: f.worktreeStatus ?? f.indexStatus, worktreeStatus: null }
+        : { ...f, indexStatus: null, worktreeStatus: f.indexStatus ?? f.worktreeStatus };
+    });
+    // Flip the open diff tab's perspective to match the new staged state
+    const openTab = workspace.tabs.find(t => t.type === 'git-diff' && t.data?.relPath === file.path);
+    if (openTab) openTab.data.staged = shouldStage;
+
     try {
       if (shouldStage) await gitStageFile(projectPath, file.path);
       else await gitUnstageFile(projectPath, file.path);
-      await load();
     } catch (e) {
       error = e?.message ?? String(e);
+    } finally {
+      await load(); // reconcile real state silently (tree stays mounted since files.length > 0)
     }
   }
 
   async function handleStageAll() {
-    try { await gitStageAll(projectPath); await load(); }
+    const toStage = new Set(files.filter(f => f.worktreeStatus).map(f => f.path));
+    files = files.map(f => toStage.has(f.path) ? { ...f, indexStatus: f.worktreeStatus, worktreeStatus: null } : f);
+    workspace.tabs
+      .filter(t => t.type === 'git-diff' && toStage.has(t.data?.relPath))
+      .forEach(t => { t.data.staged = true; });
+    try { await gitStageAll(projectPath); }
     catch (e) { error = e?.message ?? String(e); }
+    finally { await load(); }
   }
 
   async function handleUnstageAll() {
-    try { await gitUnstageAll(projectPath); await load(); }
+    const toUnstage = new Set(files.filter(f => f.indexStatus).map(f => f.path));
+    files = files.map(f => toUnstage.has(f.path) ? { ...f, worktreeStatus: f.indexStatus, indexStatus: null } : f);
+    workspace.tabs
+      .filter(t => t.type === 'git-diff' && toUnstage.has(t.data?.relPath))
+      .forEach(t => { t.data.staged = false; });
+    try { await gitUnstageAll(projectPath); }
     catch (e) { error = e?.message ?? String(e); }
+    finally { await load(); }
   }
 
   async function handleCommit() {
@@ -195,7 +229,7 @@
 
   <!-- File tree -->
   <ScrollArea class="flex-1 min-h-0 overflow-hidden">
-    {#if loading}
+    {#if loading && files.length === 0}
       <div class="flex items-center justify-center py-10 text-muted-foreground gap-2">
         <Loader2 size={14} class="animate-spin" />
         <span class="text-xs">Loading...</span>

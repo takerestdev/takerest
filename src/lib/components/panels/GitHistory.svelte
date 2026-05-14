@@ -10,15 +10,18 @@
   let loading = $state(false);
   let error = $state('');
 
+  let _reqId = 0;
+
   $effect(() => {
     refreshTick; // reload when parent signals commit/pull
     if (!projectPath) return;
+    const id = ++_reqId;
     loading = true;
     error = '';
     gitLog(projectPath, 200)
-      .then(c => { commits = c; })
-      .catch(e => { error = e?.message ?? String(e); })
-      .finally(() => { loading = false; });
+      .then(c => { if (id === _reqId) commits = c; })
+      .catch(e => { if (id === _reqId) error = e?.message ?? String(e); })
+      .finally(() => { if (id === _reqId) loading = false; });
   });
 
   function formatTime(ts) {
@@ -38,7 +41,7 @@
 </script>
 
 <div class="h-full flex flex-col overflow-hidden">
-  {#if loading}
+  {#if loading && commits.length === 0}
     <div class="flex items-center justify-center flex-1 gap-2 text-muted-foreground">
       <Loader2 size={14} class="animate-spin" />
       <span class="text-xs">Loading history...</span>

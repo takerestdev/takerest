@@ -56,10 +56,12 @@
   let createBranchError = $state('');
 
   $effect(() => {
+    const _tick = workspace.gitRefreshTick;
     if (projectPath) {
       void loadBranches();
       void loadRemoteStatus();
     }
+    if (_tick > 0) bumpRefresh();
   });
 
   async function loadBranches() {

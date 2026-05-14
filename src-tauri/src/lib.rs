@@ -2,6 +2,8 @@ mod commands;
 mod error;
 mod utils;
 
+use commands::watcher::WatcherState;
+use std::sync::Mutex;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use window_vibrancy::apply_acrylic;
 
@@ -13,6 +15,7 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(WatcherState(Mutex::new(None)))
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -62,6 +65,9 @@ pub fn run() {
             commands::api::delete_request,
             commands::api::duplicate_request,
             commands::api::create_collection,
+            // watcher commands
+            commands::watcher::watch_project,
+            commands::watcher::unwatch_project,
         ])
         .setup(|app| {
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())

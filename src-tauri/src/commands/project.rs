@@ -276,10 +276,12 @@ fn detect_git(root: &Path) -> Option<GitInfo> {
             };
 
             if resolved_path.is_dir() {
-                // Linked worktrees live under .git/worktrees/<name>
+                // Linked worktrees live under .git/worktrees/<name>; check immediate parent only
                 let is_linked = resolved_path
-                    .components()
-                    .any(|c| c.as_os_str() == "worktrees");
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n == "worktrees")
+                    .unwrap_or(false);
                 (resolved_path, is_linked)
             } else {
                 return None;

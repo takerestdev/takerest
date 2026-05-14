@@ -32,4 +32,5 @@ thiserror = "2"
 gix = { version = "0.70", features = ["status", "blob-diff", "revision", "index"] }
 imara-diff = "0.1"
 base64 = "0.22"
+notify-debouncer-full = "0.5"
 

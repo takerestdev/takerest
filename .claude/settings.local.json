@@ -3,9 +3,14 @@
     "allow": [
       "Bash(xargs grep -l \"api\\\\|env\\\\|db\\\\|kv\\\\|s3\\\\|docker\\\\|git\")",
       "WebFetch(domain:takerest.dev)",
-      "Bash(bun add *)",
-      "Bash(cargo check *)",
-      "Bash(bun run *)"
+      "Bash(cargo check)",
+      "Bash(cargo check --manifest-path *)",
+      "Bash(bun run dev)",
+      "Bash(bun run build)",
+      "Bash(bun run preview)",
+      "Bash(bun run check)",
+      "Bash(bun run check:watch)",
+      "Bash(bun run tauri)"
     ]
   }
 }

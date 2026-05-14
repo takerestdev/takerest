@@ -74,6 +74,7 @@
     }
 
     $effect(() => {
+        workspace.fileChangeTicks[relPath]; // reload when this file changes on disk
         if (relPath && folderPath) void loadFile();
     });
 

@@ -147,7 +147,7 @@ export async function gitRemoteStatus(projectPath) {
  * @typedef {{ oldStart: number, oldLines: number, newStart: number, newLines: number, lines: DiffLine[] }} DiffHunk
  * @typedef {{ kind: 'added'|'removed'|'context', content: string, oldLineno: number|null, newLineno: number|null }} DiffLine
  * @typedef {{ hash: string, shortHash: string, summary: string, body: string|null, authorName: string, authorEmail: string, timestamp: number, parents: string[] }} CommitInfo
- * @typedef {{ name: string, isRemote: boolean, upstream: string|null }} BranchInfo
+ * @typedef {{ name: string, isRemote: boolean }} BranchInfo
  * @typedef {{ current: string, isDetached: boolean, branches: BranchInfo[] }} BranchList
  * @typedef {{ data: string, mime: string }} ImageBlob
  * @typedef {{ ahead: number, behind: number, remoteName: string|null, remoteBranch: string|null }} RemoteStatus
