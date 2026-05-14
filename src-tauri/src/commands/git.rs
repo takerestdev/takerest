@@ -788,7 +788,8 @@ pub fn git_add_to_gitignore(project_path: String, pattern: String) -> Result<(),
     } else {
         String::new()
     };
-    if existing.lines().any(|l| l.trim() == pattern.trim()) {
+    let pattern = pattern.trim();
+    if existing.lines().any(|l| l.trim() == pattern) {
         return Ok(());
     }
     let new_content = if existing.is_empty() || existing.ends_with('\n') {

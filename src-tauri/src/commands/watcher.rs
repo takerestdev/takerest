@@ -179,5 +179,6 @@ pub fn unwatch_project(state: State<'_, WatcherState>) -> Result<(), AppError> {
         .lock()
         .map_err(|_| AppError::Other("watcher lock poisoned".into()))?;
     *guard = None;
+    state.1.fetch_add(1, Ordering::SeqCst);
     Ok(())
 }
