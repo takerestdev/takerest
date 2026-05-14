@@ -3,7 +3,8 @@ mod error;
 mod utils;
 
 use commands::watcher::WatcherState;
-use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use window_vibrancy::apply_acrylic;
 
@@ -15,7 +16,7 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(WatcherState(Mutex::new(None)))
+        .manage(WatcherState(Mutex::new(None), Arc::new(AtomicU64::new(0))))
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -51,11 +52,16 @@ pub fn run() {
             commands::git::git_merge_abort,
             commands::git::git_push,
             commands::git::git_publish_branch,
+            commands::git::git_delete_branch,
             commands::git::git_commit_files,
             commands::git::git_diff_commit_file,
             commands::git::git_read_blob_worktree,
             commands::git::git_read_blob_head,
             commands::git::git_remote_status,
+            commands::git::git_discard_all,
+            commands::git::git_discard_file,
+            commands::git::git_add_to_gitignore,
+            commands::git::open_file_default,
             // api commands
             commands::api::init_requests_dir,
             commands::api::get_request_tree,

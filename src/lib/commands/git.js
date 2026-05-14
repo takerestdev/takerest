@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-/** @returns {Promise<FileStatus[]>} */
+/** @returns {Promise<{ files: FileStatus[], total: number }>} */
 export async function gitStatus(projectPath) {
   return invoke("git_status", { projectPath });
 }
@@ -104,6 +104,16 @@ export async function gitPublishBranch(projectPath, branch) {
   return invoke("git_publish_branch", { projectPath, branch });
 }
 
+/**
+ * @param {string} projectPath
+ * @param {string} branch
+ * @param {boolean} [force] - true = git branch -D (force, unmerged ok)
+ * @returns {Promise<void>}
+ */
+export async function gitDeleteBranch(projectPath, branch, force) {
+  return invoke("git_delete_branch", { projectPath, branch, force: force ?? null });
+}
+
 /** @returns {Promise<FileStatus[]>} */
 export async function gitCommitFiles(projectPath, hash) {
   return invoke("git_commit_files", { projectPath, hash });
@@ -138,6 +148,26 @@ export async function gitReadBlobHead(projectPath, relPath) {
 /** @returns {Promise<RemoteStatus>} */
 export async function gitRemoteStatus(projectPath) {
   return invoke("git_remote_status", { projectPath });
+}
+
+/** @returns {Promise<void>} */
+export async function gitDiscardAll(projectPath) {
+  return invoke("git_discard_all", { projectPath });
+}
+
+/** @returns {Promise<void>} */
+export async function gitDiscardFile(projectPath, relPath) {
+  return invoke("git_discard_file", { projectPath, relPath });
+}
+
+/** @returns {Promise<void>} */
+export async function gitAddToGitignore(projectPath, pattern) {
+  return invoke("git_add_to_gitignore", { projectPath, pattern });
+}
+
+/** @returns {Promise<void>} */
+export async function openFileDefault(path) {
+  return invoke("open_file_default", { path });
 }
 
 /**

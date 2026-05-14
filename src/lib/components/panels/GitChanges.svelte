@@ -4,17 +4,21 @@
 
   import { workspace } from '$lib/stores/workspace.svelte.js';
   import {
-    gitStatus, gitStageFile, gitUnstageFile, gitStageAll, gitUnstageAll, gitCommit, gitMergeAbort,
+    gitStatus, gitStageFile, gitUnstageFile, gitStageAll, gitUnstageAll, gitCommit, gitMergeAbort, gitDiscardAll,
   } from '$lib/commands/git.js';
-  import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
   import { Textarea } from '$lib/components/ui/textarea/index.js';
   import * as Dialog from '$lib/components/ui/dialog/index.js';
+  import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
+  import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
   import GitFileTree from './GitFileTree.svelte';
   import { Loader2, RefreshCw, CheckSquare, Square, AlertTriangle } from '@lucide/svelte';
 
+  const RUST_LIMIT = 2000;
+
   let files = $state([]);
+  let totalFiles = $state(0);
   let loading = $state(false);
   let error = $state('');
   let summary = $state('');
@@ -23,9 +27,13 @@
   let commitError = $state('');
 
   let _reqId = 0;
+  let _debounceTimer = null;
 
   let commitOpen = $state(false);
   let abortingMerge = $state(false);
+  let discardAllOpen = $state(false);
+  let discardingAll = $state(false);
+  let truncated = $derived(totalFiles > RUST_LIMIT);
   let stagedCount = $derived(files.filter(f => f.indexStatus).length);
   let conflictCount = $derived(files.filter(f => f.conflicted).length);
   let inMerge = $derived(conflictCount > 0 || files.some(f => f.conflicted));
@@ -40,11 +48,12 @@
     loading = true;
     error = '';
     try {
-      const result = await gitStatus(projectPath);
+      const { files: result, total } = await gitStatus(projectPath);
       if (id !== _reqId) return; // stale response — a newer load is in flight
+      totalFiles = total;
       files = result;
       // Close git-diff tabs for files that are no longer changed (but keep git-commit tabs)
-      const openPaths = new Set(files.map(f => f.path));
+      const openPaths = new Set(result.map(f => f.path));
       workspace.tabs
         .filter(t => t.type === 'git-diff' && !openPaths.has(t.data?.relPath))
         .forEach(t => workspace.closeTab(t.id));
@@ -55,10 +64,25 @@
     }
   }
 
+  // Debounced loader — collapses burst watcher events into one gitStatus call.
+  function scheduleLoad() {
+    if (!projectPath) return;
+    loading = true;
+    clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(() => void load(), 500);
+  }
+
+  // Immediate: initial mount, post-commit, pull, publish, and .git ref changes.
   $effect(() => {
-    refreshTick;              // manual ops: commit, pull, publish
-    workspace.gitRefreshTick; // watcher: external git changes
+    refreshTick;
+    workspace.gitRefreshTick;
     if (projectPath) void load();
+  });
+
+  // Debounced: worktree file edits can arrive in rapid bursts from the watcher.
+  $effect(() => {
+    workspace.worktreeChangeTick;
+    if (projectPath) scheduleLoad();
   });
 
   /** Build a tree from flat file list */
@@ -167,6 +191,13 @@
     }
   }
 
+  async function handleDiscardAll() {
+    discardingAll = true;
+    try { await gitDiscardAll(projectPath); await load(); }
+    catch (e) { error = e?.message ?? String(e); }
+    finally { discardingAll = false; discardAllOpen = false; }
+  }
+
   async function handleMergeAbort() {
     abortingMerge = true;
     try { await gitMergeAbort(projectPath); await load(); }
@@ -183,9 +214,11 @@
 
 <div class="h-full flex flex-col overflow-hidden">
   <!-- Toolbar -->
-  <div class="flex items-center justify-between px-2 py-1.5 border-b shrink-0">
+  <ContextMenu.Root>
+  <ContextMenu.Trigger class="block w-full shrink-0">
+  <div class="flex items-center justify-between px-2 py-1.5 border-b">
     <span class="text-xs text-muted-foreground">
-      {stagedCount} staged · {files.length - stagedCount} changed
+      {truncated ? '≈ ' : ''}{stagedCount} staged · {truncated ? '≈ ' : ''}{totalFiles - stagedCount} changed
     </span>
     <div class="flex items-center gap-1">
       {#if files.some(f => f.worktreeStatus)}
@@ -206,6 +239,27 @@
       </button>
     </div>
   </div>
+  </ContextMenu.Trigger>
+  <ContextMenu.Content class="w-52">
+    <ContextMenu.Item
+      class="text-destructive focus:text-destructive focus:bg-destructive/10"
+      disabled={files.length === 0}
+      onclick={() => (discardAllOpen = true)}
+    >
+      Discard all changes
+    </ContextMenu.Item>
+  </ContextMenu.Content>
+  </ContextMenu.Root>
+
+  <!-- Too many files banner -->
+  {#if truncated}
+    <div class="shrink-0 bg-yellow-500/10 border-b border-yellow-500/20 px-3 py-2">
+      <p class="text-[11px] text-yellow-600 dark:text-yellow-400 leading-snug">
+        Showing first {RUST_LIMIT.toLocaleString()} of {totalFiles.toLocaleString()} changed files.
+        Use the terminal for large operations.
+      </p>
+    </div>
+  {/if}
 
   <!-- Merge conflict banner -->
   {#if inMerge}
@@ -229,7 +283,7 @@
   {/if}
 
   <!-- File tree -->
-  <ScrollArea class="flex-1 min-h-0 overflow-hidden">
+  <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
     {#if loading && files.length === 0}
       <div class="flex items-center justify-center py-10 text-muted-foreground gap-2">
         <Loader2 size={14} class="animate-spin" />
@@ -245,11 +299,14 @@
       <GitFileTree
         nodes={tree}
         {activeFile}
+        {projectPath}
         onFileClick={handleFileClick}
         onToggle={handleToggle}
+        onDiscard={async (file) => { await load(); }}
+        onGitignore={async () => { await load(); }}
       />
     {/if}
-  </ScrollArea>
+  </div>
 
   <!-- Commit trigger -->
   <div class="border-t shrink-0 p-2">
@@ -262,6 +319,30 @@
     </Button>
   </div>
 </div>
+
+<!-- Discard all confirmation -->
+<AlertDialog.Root bind:open={discardAllOpen}>
+  <AlertDialog.Content class="sm:max-w-sm">
+    <AlertDialog.Header>
+      <AlertDialog.Title>Discard all changes?</AlertDialog.Title>
+      <AlertDialog.Description>
+        This will restore all {truncated ? '≈ ' : ''}{totalFiles - stagedCount} changed file{totalFiles - stagedCount !== 1 ? 's' : ''} to their last committed state.
+        Staged changes will also be unstaged. This cannot be undone.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={discardingAll}>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        disabled={discardingAll}
+        onclick={handleDiscardAll}
+      >
+        {#if discardingAll}<Loader2 size={13} class="mr-1.5 animate-spin inline" />{/if}
+        Discard all
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <!-- Commit dialog -->
 <Dialog.Root bind:open={commitOpen}>

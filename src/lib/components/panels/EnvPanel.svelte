@@ -1,7 +1,7 @@
 <script>
   // @ts-nocheck
   import { workspace } from '$lib/stores/workspace.svelte.js';
-  import { listEnvFiles, createEnvFile } from '$lib/commands/env';
+  import { listEnvFiles, createEnvFile, deleteEnvFile, toggleEnvGitignore } from '$lib/commands/env';
   import { FileLock2, Plus, ShieldCheck, ShieldOff, Loader2, FileKey } from '@lucide/svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
@@ -10,6 +10,9 @@
   import { Checkbox } from '$lib/components/ui/checkbox/index.js';
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
   import * as Dialog from '$lib/components/ui/dialog/index.js';
+  import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
+  import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
   let envFiles = $state([]);
   let listLoading = $state(false);
@@ -18,6 +21,10 @@
   let addToGitignore = $state(true);
   let creating = $state(false);
   let createError = $state('');
+
+  let deleteTarget = $state(null);
+  let deleteConfirmOpen = $state(false);
+  let deleting = $state(false);
 
   let newFileName = $derived(
     newFileSuffix.trim() ? `.env.${newFileSuffix.trim()}` : '.env'
@@ -42,6 +49,40 @@
       title: file.name,
       data: { relPath: file.relPath, folderPath: workspace.folderPath },
     });
+  }
+
+  function absPath(relPath) {
+    const base = workspace.folderPath ?? '';
+    const sep = base.includes('\\') ? '\\' : '/';
+    return base.replace(/[/\\]$/, '') + sep + relPath.replace(/\//g, sep);
+  }
+
+  async function copyToClipboard(text) {
+    try { await navigator.clipboard.writeText(text); } catch {}
+  }
+
+  async function showInExplorer(relPath) {
+    try { await revealItemInDir(absPath(relPath)); } catch (e) { console.error(e); }
+  }
+
+  async function handleToggleGitignore(file) {
+    try {
+      await toggleEnvGitignore(workspace.folderPath, file);
+      workspace.refreshEnvFiles();
+    } catch (e) { console.error(e); }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    deleting = true;
+    try {
+      await deleteEnvFile(workspace.folderPath, deleteTarget.relPath);
+      workspace.closeTab(`env::${deleteTarget.relPath}`);
+      workspace.refreshEnvFiles();
+      deleteConfirmOpen = false;
+      deleteTarget = null;
+    } catch (e) { console.error(e); }
+    finally { deleting = false; }
   }
 
   async function handleCreate() {
@@ -102,27 +143,48 @@
       {:else}
         {#each envFiles as file (file.relPath)}
           {@const isActive = workspace.activeTabId === `env::${file.relPath}`}
-          <button
-            type="button"
-            onclick={() => openEnvFile(file)}
-            class="w-full text-left py-1.5 flex items-center justify-between gap-1 transition-colors relative
-              {isActive
-                ? 'bg-muted text-foreground pl-3 pr-2'
-                : 'hover:bg-muted/60 text-muted-foreground hover:text-foreground px-2'}"
-          >
-            {#if isActive}
-              <span class="absolute left-0 top-1 bottom-1 w-0.5 bg-primary rounded-r"></span>
-            {/if}
-            <span class="font-mono text-xs truncate">{file.name}</span>
-            {#if file.inGitignore}
-              <ShieldCheck class="w-3.5 h-3.5 shrink-0 text-green-600/70" />
-            {:else}
-              <ShieldOff class="w-3.5 h-3.5 shrink-0 opacity-20" />
-            {/if}
-          </button>
-          {#if file.relPath !== file.name}
-            <p class="text-[10px] px-2 pb-0.5 truncate text-muted-foreground">{file.relPath}</p>
-          {/if}
+          <ContextMenu.Root>
+            <ContextMenu.Trigger class="block w-full">
+              <button
+                type="button"
+                onclick={() => openEnvFile(file)}
+                class="w-full text-left py-1.5 flex items-center justify-between gap-1 transition-colors relative
+                  {isActive
+                    ? 'bg-muted text-foreground pl-3 pr-2'
+                    : 'hover:bg-muted/60 text-muted-foreground hover:text-foreground px-2'}"
+              >
+                {#if isActive}
+                  <span class="absolute left-0 top-1 bottom-1 w-0.5 bg-primary rounded-r"></span>
+                {/if}
+                <span class="font-mono text-xs truncate">{file.name}</span>
+                {#if file.inGitignore}
+                  <ShieldCheck class="w-3.5 h-3.5 shrink-0 text-green-600/70" />
+                {:else}
+                  <ShieldOff class="w-3.5 h-3.5 shrink-0 opacity-20" />
+                {/if}
+              </button>
+              {#if file.relPath !== file.name}
+                <p class="text-[10px] px-2 pb-0.5 truncate text-muted-foreground">{file.relPath}</p>
+              {/if}
+            </ContextMenu.Trigger>
+            <ContextMenu.Content class="w-56">
+              <ContextMenu.Item onclick={() => handleToggleGitignore(file)}>
+                {file.inGitignore ? 'Remove from .gitignore' : 'Add to .gitignore'}
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item onclick={() => copyToClipboard(absPath(file.relPath))}>Copy file path</ContextMenu.Item>
+              <ContextMenu.Item onclick={() => copyToClipboard(file.relPath)}>Copy relative path</ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item onclick={() => showInExplorer(file.relPath)}>Show in Explorer</ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item
+                class="text-destructive focus:text-destructive focus:bg-destructive/10"
+                onclick={() => { deleteTarget = file; deleteConfirmOpen = true; }}
+              >
+                Delete file
+              </ContextMenu.Item>
+            </ContextMenu.Content>
+          </ContextMenu.Root>
         {/each}
       {/if}
     </div>
@@ -189,3 +251,26 @@
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
+
+<!-- Delete confirmation -->
+<AlertDialog.Root bind:open={deleteConfirmOpen}>
+  <AlertDialog.Content class="sm:max-w-sm">
+    <AlertDialog.Header>
+      <AlertDialog.Title>Delete {deleteTarget?.name}?</AlertDialog.Title>
+      <AlertDialog.Description>
+        This will permanently delete <span class="font-mono text-foreground">{deleteTarget?.relPath}</span> from disk. This cannot be undone.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={deleting}>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        disabled={deleting}
+        onclick={handleDelete}
+      >
+        {#if deleting}<Loader2 size={13} class="mr-1.5 animate-spin inline" />{/if}
+        Delete
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

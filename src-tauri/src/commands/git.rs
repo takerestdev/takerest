@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -7,6 +8,8 @@ use gix::bstr::ByteSlice;
 use imara_diff::intern::InternedInput;
 use imara_diff::{diff as imara_diff_fn, Algorithm, UnifiedDiffBuilder};
 use serde::Serialize;
+use tauri::AppHandle;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
 
@@ -121,7 +124,16 @@ pub struct RemoteStatus {
     pub remote_branch: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusResult {
+    pub files: Vec<FileStatus>,
+    pub total: usize,
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const STATUS_LIMIT: usize = 2_000;
 
 const IMAGE_EXTS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp", "tiff", "avif",
@@ -276,8 +288,9 @@ fn run_git(project_path: &str, args: &[&str]) -> Result<(), AppError> {
 // ── Read Commands (gix) ───────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn git_status(project_path: String) -> Result<Vec<FileStatus>, AppError> {
+pub fn git_status(project_path: String) -> Result<StatusResult, AppError> {
     let output = Command::new("git")
+        .arg("--no-optional-locks")
         .arg("-C").arg(&project_path)
         .args(["status", "--porcelain=v1", "-u"])
         .output()
@@ -288,22 +301,27 @@ pub fn git_status(project_path: String) -> Result<Vec<FileStatus>, AppError> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut files: Vec<FileStatus> = Vec::new();
+    let mut files: Vec<FileStatus> = Vec::with_capacity(STATUS_LIMIT.min(256));
+    let mut total = 0usize;
 
     for line in stdout.lines() {
         if line.len() < 3 { continue; }
+        total += 1;
+
+        // Count all lines but only parse the first STATUS_LIMIT — keeps the
+        // IPC payload small even when tens of thousands of files are changed.
+        if files.len() >= STATUS_LIMIT { continue; }
+
         let x = line.as_bytes()[0] as char;
         let y = line.as_bytes()[1] as char;
         let path_raw = &line[3..];
 
-        // Strip outer quotes git adds for non-ASCII paths
         let path_unquoted = if path_raw.starts_with('"') && path_raw.ends_with('"') {
             &path_raw[1..path_raw.len() - 1]
         } else {
             path_raw
         };
 
-        // Renames: "old -> new"; take the new path as canonical
         let (path, rename_from) = if let Some(idx) = path_unquoted.find(" -> ") {
             let from = path_unquoted[..idx].trim_matches('"').to_string();
             let to   = path_unquoted[idx + 4..].trim_matches('"').to_string();
@@ -314,7 +332,6 @@ pub fn git_status(project_path: String) -> Result<Vec<FileStatus>, AppError> {
 
         let file_kind = classify_path(&path);
 
-        // Detect merge conflicts: UU, AA, DD, AU, UA, DU, UD
         let conflicted = matches!(
             (x, y),
             ('U','U') | ('A','A') | ('D','D') |
@@ -343,7 +360,7 @@ pub fn git_status(project_path: String) -> Result<Vec<FileStatus>, AppError> {
         let worktree_status = match y {
             'M' => Some(ChangeKind::Modified),
             'D' => Some(ChangeKind::Deleted),
-            '?' => Some(ChangeKind::Added), // untracked
+            '?' => Some(ChangeKind::Added),
             _ => None,
         };
 
@@ -352,7 +369,7 @@ pub fn git_status(project_path: String) -> Result<Vec<FileStatus>, AppError> {
         }
     }
 
-    Ok(files)
+    Ok(StatusResult { files, total })
 }
 
 #[tauri::command]
@@ -633,6 +650,13 @@ pub fn git_publish_branch(project_path: String, branch: String) -> Result<(), Ap
     run_git(&project_path, &["push", "--set-upstream", "origin", &branch])
 }
 
+/// Delete a local branch. Use force=true for branches not fully merged.
+#[tauri::command]
+pub fn git_delete_branch(project_path: String, branch: String, force: Option<bool>) -> Result<(), AppError> {
+    let flag = if force.unwrap_or(false) { "-D" } else { "-d" };
+    run_git(&project_path, &["branch", flag, &branch])
+}
+
 /// Returns the list of files changed in a commit (vs its first parent).
 /// Uses `git diff <parent> <hash>` which correctly handles merge commits.
 #[tauri::command]
@@ -719,4 +743,59 @@ pub fn git_diff_commit_file(
 
     let (hunks, total_added, total_removed, truncated) = diff_bytes(&old_bytes, &new_bytes, max);
     Ok(DiffResult { hunks, truncated, total_added, total_removed, is_binary: false, is_image: false })
+}
+
+/// Open a file with the OS default application.
+#[tauri::command]
+pub fn open_file_default(app: AppHandle, path: String) -> Result<(), AppError> {
+    app.opener()
+        .open_path(&path, None::<&str>)
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Discard ALL changes — restores every tracked file (staged + worktree) to HEAD.
+#[tauri::command]
+pub fn git_discard_all(project_path: String) -> Result<(), AppError> {
+    run_git(
+        &project_path,
+        &["restore", "--source=HEAD", "--staged", "--worktree", "."],
+    )
+}
+
+/// Discard changes to a file, restoring it to HEAD.
+/// For tracked files: restores staged + worktree from HEAD.
+/// For newly staged files not in HEAD: just unstages them.
+#[tauri::command]
+pub fn git_discard_file(project_path: String, rel_path: String) -> Result<(), AppError> {
+    if run_git(
+        &project_path,
+        &["restore", "--source=HEAD", "--staged", "--worktree", "--", &rel_path],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+    run_git(&project_path, &["restore", "--staged", "--", &rel_path])
+}
+
+/// Append a pattern to the project's .gitignore, creating it if needed.
+/// No-ops if the pattern is already present.
+#[tauri::command]
+pub fn git_add_to_gitignore(project_path: String, pattern: String) -> Result<(), AppError> {
+    let gitignore = Path::new(&project_path).join(".gitignore");
+    let existing = if gitignore.exists() {
+        fs::read_to_string(&gitignore).map_err(|e| AppError::Other(e.to_string()))?
+    } else {
+        String::new()
+    };
+    let pattern = pattern.trim();
+    if existing.lines().any(|l| l.trim() == pattern) {
+        return Ok(());
+    }
+    let new_content = if existing.is_empty() || existing.ends_with('\n') {
+        format!("{}{}\n", existing, pattern)
+    } else {
+        format!("{}\n{}\n", existing, pattern)
+    };
+    fs::write(gitignore, new_content).map_err(|e| AppError::Other(e.to_string()))
 }
