@@ -218,7 +218,7 @@
   <ContextMenu.Trigger class="block w-full shrink-0">
   <div class="flex items-center justify-between px-2 py-1.5 border-b">
     <span class="text-xs text-muted-foreground">
-      {stagedCount} staged · {totalFiles - stagedCount} changed
+      {truncated ? '≈ ' : ''}{stagedCount} staged · {truncated ? '≈ ' : ''}{totalFiles - stagedCount} changed
     </span>
     <div class="flex items-center gap-1">
       {#if files.some(f => f.worktreeStatus)}
@@ -326,7 +326,7 @@
     <AlertDialog.Header>
       <AlertDialog.Title>Discard all changes?</AlertDialog.Title>
       <AlertDialog.Description>
-        This will restore all {totalFiles - stagedCount} changed file{totalFiles - stagedCount !== 1 ? 's' : ''} to their last committed state.
+        This will restore all {truncated ? '≈ ' : ''}{totalFiles - stagedCount} changed file{totalFiles - stagedCount !== 1 ? 's' : ''} to their last committed state.
         Staged changes will also be unstaged. This cannot be undone.
       </AlertDialog.Description>
     </AlertDialog.Header>

@@ -3,7 +3,8 @@ mod error;
 mod utils;
 
 use commands::watcher::WatcherState;
-use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use window_vibrancy::apply_acrylic;
 
@@ -15,7 +16,7 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(WatcherState(Mutex::new(None)))
+        .manage(WatcherState(Mutex::new(None), Arc::new(AtomicU64::new(0))))
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

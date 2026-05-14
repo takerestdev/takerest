@@ -1,5 +1,6 @@
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use notify_debouncer_full::{
@@ -12,7 +13,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::error::AppError;
 
-pub struct WatcherState(pub Mutex<Option<Debouncer<RecommendedWatcher, FileIdMap>>>);
+pub struct WatcherState(
+    pub Mutex<Option<Debouncer<RecommendedWatcher, FileIdMap>>>,
+    pub Arc<AtomicU64>,
+);
 
 #[derive(Serialize, Clone)]
 pub struct FsChangedPayload {
@@ -61,9 +65,9 @@ fn is_skip_dir(name: &str) -> bool {
     SKIP_DIRS.contains(&name)
 }
 
-// Selective watch: covers 2 levels of dirs before going recursive,
-// skipping known large dirs at each level. This avoids FileIdMap
-// scanning node_modules / target which can have 100k+ files.
+// Selective watch: root non-recursive + each non-skip depth-1 dir recursive.
+// This avoids FileIdMap scanning node_modules / target which can have 100k+ files,
+// while ensuring new subdirectories created under watched dirs are picked up.
 fn setup_watches(debouncer: &mut Debouncer<RecommendedWatcher, FileIdMap>, root: &Path) {
     // Root itself (non-recursive) — catches root-level file changes
     let _ = debouncer.watch(root, RecursiveMode::NonRecursive);
@@ -76,23 +80,8 @@ fn setup_watches(debouncer: &mut Debouncer<RecommendedWatcher, FileIdMap>, root:
         let d1_name = d1_entry.file_name();
         if is_skip_dir(&d1_name.to_string_lossy()) { continue; }
 
-        let d1 = d1_entry.path();
-
-        // d1 non-recursive — catches files directly inside this dir
-        let _ = debouncer.watch(&d1, RecursiveMode::NonRecursive);
-
-        let Ok(depth2) = std::fs::read_dir(&d1) else { continue };
-        for d2_entry in depth2.flatten() {
-            let Ok(sft) = d2_entry.file_type() else { continue };
-            if !sft.is_dir() { continue; }
-
-            let d2_name = d2_entry.file_name();
-            if is_skip_dir(&d2_name.to_string_lossy()) { continue; }
-
-            // d2 recursive — covers all depth 3+ files; FileIdMap only
-            // scans from here, not from root
-            let _ = debouncer.watch(&d2_entry.path(), RecursiveMode::Recursive);
-        }
+        // Recursive so new subdirectories created later are automatically covered
+        let _ = debouncer.watch(&d1_entry.path(), RecursiveMode::Recursive);
     }
 }
 
@@ -102,27 +91,34 @@ pub fn watch_project(
     state: State<'_, WatcherState>,
     project_path: String,
 ) -> Result<(), AppError> {
-    // Drop existing watcher immediately (fast, no I/O)
-    {
+    // Drop existing watcher and advance the generation counter atomically.
+    // The background thread captures my_gen and aborts if the counter has moved on.
+    let my_gen = {
         let mut guard = state
             .0
             .lock()
             .map_err(|_| AppError::Other("watcher lock poisoned".into()))?;
         *guard = None;
-    }
+        state.1.fetch_add(1, Ordering::SeqCst) + 1
+    };
 
     // Run the actual setup in a background thread so this command returns
     // immediately and doesn't block the Tauri thread pool.
     let app_clone = app.clone();
+    let gen_arc = Arc::clone(&state.1);
     std::thread::spawn(move || {
         let root = std::path::PathBuf::from(&project_path);
         let base = root.clone();
         let app_for_events = app_clone.clone();
+        let gen_for_events = Arc::clone(&gen_arc);
 
         let debouncer_result = new_debouncer(
             Duration::from_millis(250),
             None,
             move |result: DebounceEventResult| {
+                // Abort if a newer watch_project call has superseded this one
+                if gen_for_events.load(Ordering::SeqCst) != my_gen { return; }
+
                 let events = match result {
                     Ok(ev) => ev,
                     Err(_) => return,
@@ -164,10 +160,12 @@ pub fn watch_project(
 
         setup_watches(&mut debouncer, &root);
 
-        // Store the live watcher in shared state
+        // Only store if this thread is still the current one
         let watcher_state = app_clone.state::<WatcherState>();
         if let Ok(mut guard) = watcher_state.0.lock() {
-            *guard = Some(debouncer);
+            if watcher_state.1.load(Ordering::SeqCst) == my_gen {
+                *guard = Some(debouncer);
+            }
         };
     });
 

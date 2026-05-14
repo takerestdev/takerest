@@ -8,6 +8,8 @@ use gix::bstr::ByteSlice;
 use imara_diff::intern::InternedInput;
 use imara_diff::{diff as imara_diff_fn, Algorithm, UnifiedDiffBuilder};
 use serde::Serialize;
+use tauri::AppHandle;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
 
@@ -745,26 +747,10 @@ pub fn git_diff_commit_file(
 
 /// Open a file with the OS default application.
 #[tauri::command]
-pub fn open_file_default(path: String) -> Result<(), AppError> {
-    #[cfg(target_os = "windows")]
-    Command::new("cmd")
-        .args(["/c", "start", "", &path])
-        .spawn()
-        .map_err(|e| AppError::Other(e.to_string()))?;
-
-    #[cfg(target_os = "macos")]
-    Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| AppError::Other(e.to_string()))?;
-
-    #[cfg(target_os = "linux")]
-    Command::new("xdg-open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| AppError::Other(e.to_string()))?;
-
-    Ok(())
+pub fn open_file_default(app: AppHandle, path: String) -> Result<(), AppError> {
+    app.opener()
+        .open_path(&path, None::<&str>)
+        .map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Discard ALL changes — restores every tracked file (staged + worktree) to HEAD.

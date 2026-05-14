@@ -202,7 +202,7 @@
   <div style="height: {totalH}px; position: relative;">
     <!-- Only the visible slice, offset to its correct position -->
     <div style="position: absolute; top: {padTop}px; left: 0; right: 0;">
-      {#each visible as { node, depth } (node.path + depth)}
+      {#each visible as { node, depth } (`${node.path}::${depth}`)}
         {#if node.type === 'dir'}
           {@render dirRow(node, depth)}
         {:else}
