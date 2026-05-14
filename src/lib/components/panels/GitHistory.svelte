@@ -3,6 +3,7 @@
   let { projectPath, onOpenCommit, refreshTick } = $props();
 
   import { gitLog } from '$lib/commands/git.js';
+  import { workspace } from '$lib/stores/workspace.svelte.js';
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
   import { Loader2 } from '@lucide/svelte';
 
@@ -13,7 +14,8 @@
   let _reqId = 0;
 
   $effect(() => {
-    refreshTick; // reload when parent signals commit/pull
+    refreshTick;              // manual ops: commit, pull, publish
+    workspace.gitRefreshTick; // watcher: external git changes
     if (!projectPath) return;
     const id = ++_reqId;
     loading = true;

@@ -56,7 +56,8 @@
   }
 
   $effect(() => {
-    refreshTick; // reactive dep — reload when parent signals a change
+    refreshTick;              // manual ops: commit, pull, publish
+    workspace.gitRefreshTick; // watcher: external git changes
     if (projectPath) void load();
   });
 
