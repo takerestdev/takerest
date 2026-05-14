@@ -29,7 +29,6 @@ fn to_rel(base: &Path, path: &Path) -> Option<String> {
 
     // Ignore lock files and git internal churn
     if s.ends_with(".lock")
-        || s == ".git/index"
         || s.starts_with(".git/objects/")
         || s.starts_with(".git/logs/")
         || s.starts_with(".git/pack-refs")
