@@ -11,6 +11,7 @@ function createWorkspace() {
   let fileChangeTicks = $state({});
   let gitRefreshTick = $state(0);
   let worktreeChangeTick = $state(0);
+  let dockerRefreshTick = $state(0);
 
   return {
     get activeTool() { return activeTool; },
@@ -35,6 +36,7 @@ function createWorkspace() {
     get fileChangeTicks() { return fileChangeTicks; },
     get gitRefreshTick() { return gitRefreshTick; },
     get worktreeChangeTick() { return worktreeChangeTick; },
+    get dockerRefreshTick() { return dockerRefreshTick; },
 
     openTab(tab) {
       const existing = tabs.find(t => t.id === tab.id);
@@ -81,6 +83,10 @@ function createWorkspace() {
 
     bumpWorktree() {
       worktreeChangeTick++;
+    },
+
+    bumpDocker() {
+      dockerRefreshTick++;
     },
   };
 }

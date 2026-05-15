@@ -25,12 +25,15 @@
   import EnvPanel from '$lib/components/panels/EnvPanel.svelte';
   import ApiPanel from '$lib/components/panels/ApiPanel.svelte';
   import GitPanel from '$lib/components/panels/GitPanel.svelte';
+  import DockerPanel from '$lib/components/panels/DockerPanel.svelte';
   import StubPanel from '$lib/components/panels/StubPanel.svelte';
   import ReadmeTab from '$lib/components/workspace/ReadmeTab.svelte';
   import EnvTab from '$lib/components/workspace/EnvTab.svelte';
   import DiffTab from '$lib/components/workspace/DiffTab.svelte';
   import ImageDiffTab from '$lib/components/workspace/ImageDiffTab.svelte';
   import CommitTab from '$lib/components/workspace/CommitTab.svelte';
+  import DockerLogsTab from '$lib/components/workspace/DockerLogsTab.svelte';
+  import FileTab from '$lib/components/workspace/FileTab.svelte';
 
   let isWindows = $state(false);
   let appWindow;
@@ -122,8 +125,15 @@
     s3: 'Storage', git: 'Git', docker: 'Docker', env: 'Env Files',
   };
 
-  import { GitBranch as GitBranchIcon, GitCommit } from '@lucide/svelte';
-  const tabTypeIcons = { readme: FileText, 'env-file': FileKey, 'git-diff': GitBranchIcon, 'git-commit': GitCommit };
+  import { GitBranch as GitBranchIcon, GitCommit, Terminal as TerminalIcon, FileCode } from '@lucide/svelte';
+  const tabTypeIcons = {
+    readme: FileText,
+    'env-file': FileKey,
+    'git-diff': GitBranchIcon,
+    'git-commit': GitCommit,
+    'docker-logs': TerminalIcon,
+    'file-edit': FileCode,
+  };
 
   let activeTab = $derived(workspace.tabs.find(t => t.id === workspace.activeTabId) ?? null);
 
@@ -273,6 +283,8 @@
                 <ApiPanel />
               {:else if workspace.activeTool === 'git'}
                 <GitPanel />
+              {:else if workspace.activeTool === 'docker'}
+                <DockerPanel />
               {:else}
                 <StubPanel tool={workspace.activeTool} />
               {/if}
@@ -356,6 +368,10 @@
             {/if}
           {:else if tab.type === 'git-commit'}
             <CommitTab data={tab.data} />
+          {:else if tab.type === 'docker-logs'}
+            <DockerLogsTab data={tab.data} tabId={tab.id} />
+          {:else if tab.type === 'file-edit'}
+            <FileTab data={tab.data} />
           {/if}
         </div>
       {/each}
