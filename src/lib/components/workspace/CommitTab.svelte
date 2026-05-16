@@ -16,7 +16,7 @@
   // Plain object instead of Map — Svelte 5's object property reactivity is
   // reliable from async callbacks; Map.get() tracking in $derived.by is not.
   // path → null (pending) | { error: string, result: any|null } (settled)
-  let fileDiffs     = $state({});
+  let fileDiffs     = $state(Object.create(null));
   let activeFileIdx = $state(0);
 
   let scrollEl     = $state(null);
@@ -31,7 +31,7 @@
   let _requested = new Set();
   const MAX_CONCURRENT = 4;
 
-  function resetQueue() { _gen++; _queue = []; _inFlight = 0; _requested = new Set(); }
+  function resetQueue() { _gen++; _queue = []; _requested = new Set(); }
 
   function enqueueFile(file) {
     if (_requested.has(file.path)) return;
@@ -61,7 +61,7 @@
   $effect(() => {
     if (!commit?.hash || !folderPath) return;
     resetQueue();
-    filesLoading = true; filesError = ''; files = []; fileDiffs = {};
+    filesLoading = true; filesError = ''; files = []; fileDiffs = Object.create(null);
     activeFileIdx = 0; scrollTop = 0;
 
     const gen = _gen;
@@ -70,7 +70,7 @@
         if (gen !== _gen) return;
         // Initialise all as null (pending) before setting files,
         // so allRows sees them immediately when files becomes non-empty.
-        const pending = {};
+        const pending = Object.create(null);
         for (const file of f) pending[file.path] = null;
         fileDiffs = pending;
         files = f;
