@@ -227,4 +227,11 @@ body {
   *::-webkit-scrollbar-corner {
     background: transparent;
   }
+
+  /* CodeMirror selection — global override so it beats any injected theme */
+  .cm-selectionBackground,
+  .cm-focused .cm-selectionBackground,
+  .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+    background-color: color-mix(in oklch, var(--primary) 35%, transparent) !important;
+  }
 }

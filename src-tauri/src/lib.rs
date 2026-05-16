@@ -2,6 +2,7 @@ mod commands;
 mod error;
 mod utils;
 
+use commands::docker::{DockerEventState, DockerStreamState};
 use commands::watcher::WatcherState;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -17,6 +18,8 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 pub fn run() {
     tauri::Builder::default()
         .manage(WatcherState(Mutex::new(None), Arc::new(AtomicU64::new(0))))
+        .manage(DockerStreamState::new())
+        .manage(DockerEventState::new())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -57,6 +60,7 @@ pub fn run() {
             commands::git::git_diff_commit_file,
             commands::git::git_read_blob_worktree,
             commands::git::git_read_blob_head,
+            commands::git::git_read_blob_at_commit,
             commands::git::git_remote_status,
             commands::git::git_discard_all,
             commands::git::git_discard_file,
@@ -74,8 +78,34 @@ pub fn run() {
             // watcher commands
             commands::watcher::watch_project,
             commands::watcher::unwatch_project,
+            // file commands
+            commands::files::read_project_file,
+            commands::files::write_project_file,
+            // docker commands
+            commands::docker::docker_list_containers,
+            commands::docker::docker_list_images,
+            commands::docker::docker_list_compose_files,
+            commands::docker::docker_container_start,
+            commands::docker::docker_container_stop,
+            commands::docker::docker_container_restart,
+            commands::docker::docker_container_remove,
+            commands::docker::docker_image_remove,
+            commands::docker::docker_start_log_stream,
+            commands::docker::docker_stop_log_stream,
+            commands::docker::docker_compose_up,
+            commands::docker::docker_compose_down,
+            commands::docker::docker_ping,
+            commands::docker::docker_start_engine,
+            commands::docker::docker_stop_engine,
+            commands::docker::docker_watch_events,
+            commands::docker::docker_stop_watch_events,
+            commands::docker::docker_exec_cmd,
         ])
         .setup(|app| {
+            // Warm up the Docker connection in the background so the first
+            // user-visible Docker panel load hits an existing connection.
+            commands::docker::prewarm_docker();
+
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("takerest")
                 .inner_size(1200.0, 800.0)

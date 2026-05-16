@@ -548,6 +548,21 @@ pub fn git_read_blob_head(project_path: String, rel_path: String) -> Result<Imag
     Ok(ImageBlob { data: B64.encode(&data), mime: mime_for_ext(&ext).into() })
 }
 
+#[tauri::command]
+pub fn git_read_blob_at_commit(project_path: String, commit_hash: String, rel_path: String) -> Result<ImageBlob, AppError> {
+    let spec = format!("{commit_hash}:{rel_path}");
+    let output = Command::new("git")
+        .arg("-C").arg(&project_path)
+        .args(["show", &spec])
+        .output()
+        .map_err(AppError::Io)?;
+    if !output.status.success() {
+        return Err(AppError::Git(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
+    let ext = Path::new(&rel_path).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+    Ok(ImageBlob { data: B64.encode(&output.stdout), mime: mime_for_ext(&ext).into() })
+}
+
 // ── Mutating Commands (git CLI) ───────────────────────────────────────────────
 // gix's index/commit mutation API is still maturing; git CLI handles all edge
 // cases (modes, symlinks, submodules, hooks) correctly and is universally available.
