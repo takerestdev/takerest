@@ -1,11 +1,11 @@
 <script>
   // @ts-nocheck
-  let { data, tabId } = $props();
+  let { data } = $props();
 
   import { listen } from '@tauri-apps/api/event';
-  import { workspace } from '$lib/stores/workspace.svelte.js';
   import { dockerStartLogStream, dockerStopLogStream, dockerExecCmd } from '$lib/commands/docker.js';
-  import { Terminal, Search, X, Trash2, ChevronsDown, Clock, Loader2 } from '@lucide/svelte';
+  import { Terminal, Search, X, Trash2, ChevronsDown, Clock, Loader2, FileKey, Copy, Check } from '@lucide/svelte';
+  import * as Dialog from '$lib/components/ui/dialog/index.js';
 
   let containerId    = $derived(data.containerId);
   let containerName  = $derived(data.containerName);
@@ -19,17 +19,13 @@
   // ── UI prefs ───────────────────────────────────────────────────────────────
   let showTimestamps = $state(true);
 
-  // ── Active / inactive tracking ─────────────────────────────────────────────
-  let isActive = $derived(workspace.activeTabId === tabId);
-
   let sessionId = 0;
 
+  // Stream starts once on mount, stays alive while tab exists (block/hidden),
+  // stops only when the tab is closed (component unmounts). This preserves
+  // scroll position and accumulates new logs in the background.
   $effect(() => {
-    if (isActive) {
-      void activate();
-    } else {
-      void deactivate();
-    }
+    void activate();
     return () => { void deactivate(); };
   });
 
@@ -56,7 +52,7 @@
     });
 
     try {
-      await dockerStartLogStream(containerId, 2000);
+      await dockerStartLogStream(containerId, 0); // 0 = all logs
     } catch (e) {
       if (sessionId === mySession) {
         batchPush({ timestamp: null, message: `[error: ${e}]`, stream: 'stderr' });
@@ -69,6 +65,9 @@
     if (!streaming) return;
     streaming = false;
     sessionId++;
+
+    if (batchFrame !== null) { cancelAnimationFrame(batchFrame); batchFrame = null; }
+    pending.length = 0;
 
     unlistenLog?.();
     unlistenEnd?.();
@@ -184,6 +183,65 @@
     }
   }
 
+  // ── Env vars modal ────────────────────────────────────────────────────────
+  let envOpen    = $state(false);
+  let envVars    = $state([]);   // { key, value }[] — value is editable
+  let envLoading = $state(false);
+  let envError   = $state('');
+  let envSearch  = $state('');
+  let copiedKeys = $state(new Set());
+  let copiedAll  = $state(false);
+
+  let filteredEnv = $derived(
+    envSearch
+      ? envVars.filter(e =>
+          e.key.toLowerCase().includes(envSearch.toLowerCase()) ||
+          e.value.toLowerCase().includes(envSearch.toLowerCase()))
+      : envVars
+  );
+
+  async function openEnv() {
+    envOpen = true;
+    if (envVars.length > 0) return; // cached — re-open is instant
+    envLoading = true;
+    envError = '';
+    try {
+      const result = await dockerExecCmd(containerId, 'printenv | sort');
+      const src = result.stdout || result.stderr;
+      let idCounter = 0;
+      envVars = src
+        .split('\n')
+        .filter(Boolean)
+        .map(line => {
+          const eq = line.indexOf('=');
+          return eq === -1
+            ? { id: idCounter++, key: line, value: '' }
+            : { id: idCounter++, key: line.slice(0, eq), value: line.slice(eq + 1) };
+        });
+      if (!result.stdout && result.stderr) envError = result.stderr;
+    } catch (e) {
+      envError = String(e);
+    } finally {
+      envLoading = false;
+    }
+  }
+
+  function copyRow(id, key, value) {
+    navigator.clipboard.writeText(`${key}=${value}`);
+    copiedKeys = new Set([...copiedKeys, id]);
+    setTimeout(() => {
+      copiedKeys = new Set([...copiedKeys].filter(k => k !== id));
+    }, 1500);
+  }
+
+  function copyAll() {
+    const text = envVars.map(e => `${e.key}=${e.value}`).join('\n');
+    navigator.clipboard.writeText(text);
+    copiedAll = true;
+    setTimeout(() => { copiedAll = false; }, 1500);
+  }
+
+
   // ── Search highlight (XSS-safe) ────────────────────────────────────────────
   function escHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -210,6 +268,16 @@
     <span class="text-[10px] text-muted-foreground shrink-0">
       {searchQuery ? `${filteredLogs.length} / ${logs.length}` : logs.length} lines
     </span>
+
+    <button
+      type="button"
+      title="View environment variables"
+      onclick={openEnv}
+      class="flex items-center gap-1 text-[10px] font-sans text-muted-foreground hover:text-foreground transition-colors shrink-0 px-1.5 py-0.5 rounded hover:bg-muted/60"
+    >
+      <FileKey size={11} />
+      .env
+    </button>
 
     <button
       type="button"
@@ -335,6 +403,111 @@
   </div>
 
 </div>
+
+<!-- Env vars modal -->
+<Dialog.Root bind:open={envOpen}>
+  <Dialog.Content class="sm:max-w-4xl w-full font-sans">
+    <Dialog.Header>
+      <div class="flex items-center justify-between">
+        <Dialog.Title class="flex items-center gap-2 text-sm">
+          <FileKey size={14} class="text-muted-foreground" />
+          {containerName} — environment
+        </Dialog.Title>
+        <button
+          type="button"
+          onclick={copyAll}
+          disabled={envLoading || envVars.length === 0}
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs mr-6
+            {copiedAll ? 'text-green-500 bg-green-500/10' : 'text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted'}
+            transition-colors disabled:opacity-40"
+        >
+          {#if copiedAll}
+            <Check size={11} />
+            Copied!
+          {:else}
+            <Copy size={11} />
+            Copy all as .env
+          {/if}
+        </button>
+      </div>
+    </Dialog.Header>
+
+    <!-- Search -->
+    <div class="relative flex items-center border rounded-md mt-2">
+      <Search size={12} class="absolute left-3 text-muted-foreground pointer-events-none" />
+      <input
+        type="text"
+        placeholder="Filter variables…"
+        bind:value={envSearch}
+        class="w-full h-8 pl-8 pr-3 bg-transparent text-xs outline-none focus:ring-0 border-0 focus:border-0"
+      />
+      {#if envSearch}
+        <button type="button" onclick={() => (envSearch = '')} class="absolute right-2 text-muted-foreground hover:text-foreground">
+          <X size={11} />
+        </button>
+      {/if}
+    </div>
+
+    <div class="overflow-y-auto max-h-[65vh] mt-2 rounded-md border bg-muted/10">
+      {#if envLoading}
+        <div class="flex items-center justify-center py-16 gap-2 text-muted-foreground text-sm">
+          <Loader2 size={14} class="animate-spin" />
+          Loading…
+        </div>
+      {:else if envError}
+        <p class="p-4 text-destructive text-xs font-mono">{envError}</p>
+      {:else if filteredEnv.length === 0}
+        <p class="p-4 text-muted-foreground text-xs text-center">
+          {envSearch ? 'No matches' : 'No environment variables found'}
+        </p>
+      {:else}
+        <!-- Column headers -->
+        <div class="grid grid-cols-[minmax(160px,28%)_1fr_auto] items-center px-3 py-1.5 border-b bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+          <span>Key</span>
+          <span>Value</span>
+          <span class="w-8"></span>
+        </div>
+        {#each filteredEnv as row (row.id)}
+          {@const copied = copiedKeys.has(row.id)}
+          <div class="grid grid-cols-[minmax(160px,28%)_1fr_auto] items-center px-3 border-b last:border-0 hover:bg-muted/30 transition-colors group font-mono text-[12px]">
+            <input
+              type="text"
+              bind:value={row.key}
+              placeholder="KEY"
+              class="w-full py-2 pr-3 bg-transparent text-primary/90 placeholder:text-muted-foreground/40
+                outline-none focus:ring-0 border-0 focus:border-0 focus:bg-muted/20 rounded px-1 -mx-1 transition-colors"
+            />
+            <input
+              type="text"
+              bind:value={row.value}
+              placeholder="value"
+              class="w-full py-2 bg-transparent text-foreground/85 outline-none focus:ring-0 border-0
+                focus:border-0 focus:bg-muted/20 rounded px-1 -mx-1 transition-colors"
+            />
+            <div class="flex items-center justify-end w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onclick={() => copyRow(row.id, row.key, row.value)}
+                title="Copy KEY=VALUE"
+                class="flex items-center justify-center w-7 h-7 rounded transition-colors
+                  {copied ? 'text-green-500' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+              >
+                {#if copied}<Check size={12} />{:else}<Copy size={12} />{/if}
+              </button>
+            </div>
+          </div>
+        {/each}
+      {/if}
+    </div>
+
+    <div class="flex items-center justify-between mt-1.5">
+      <p class="text-[10px] text-muted-foreground">
+        {filteredEnv.length} variable{filteredEnv.length !== 1 ? 's' : ''}
+        {#if envSearch && filteredEnv.length !== envVars.length} of {envVars.length}{/if}
+      </p>
+    </div>
+  </Dialog.Content>
+</Dialog.Root>
 
 <style>
   mark {

@@ -369,11 +369,11 @@ pub async fn docker_start_log_stream(
             stdout: true,
             stderr: true,
             timestamps: true,
-            tail: tail.to_string(),
+            tail: if tail == 0 { "all".to_string() } else { tail.to_string() },
             ..Default::default()
         };
 
-        eprintln!("[log_stream:{}] starting (tail={})", &cid[..12], tail);
+        eprintln!("[log_stream:{}] starting (tail={})", cid.get(..12).unwrap_or(&cid), tail);
         let mut stream = docker.logs(&cid, Some(opts));
         let mut emitted = 0u64;
 
@@ -389,7 +389,7 @@ pub async fn docker_start_log_stream(
                     }
                 }
                 Err(e) => {
-                    eprintln!("[log_stream:{}] stream error: {e}", &cid[..12]);
+                    eprintln!("[log_stream:{}] stream error: {e}", cid.get(..12).unwrap_or(&cid));
                     let _ = app_clone.emit(
                         &format!("docker:log:{}", cid),
                         DockerLogLine {
@@ -403,7 +403,7 @@ pub async fn docker_start_log_stream(
             }
         }
 
-        eprintln!("[log_stream:{}] ended, emitted={emitted}", &cid[..12]);
+        eprintln!("[log_stream:{}] ended, emitted={emitted}", cid.get(..12).unwrap_or(&cid));
         let _ = app_clone.emit(&format!("docker:log-end:{}", cid), ());
     });
 

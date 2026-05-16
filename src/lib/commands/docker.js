@@ -24,7 +24,7 @@ export const dockerContainerRemove = (containerId, force = false) =>
 export const dockerImageRemove = (imageId, force = false) =>
   invoke('docker_image_remove', { imageId, force });
 
-export const dockerStartLogStream = (containerId, tail = 2000) =>
+export const dockerStartLogStream = (containerId, tail = 0) =>
   invoke('docker_start_log_stream', { containerId, tail });
 
 export const dockerStopLogStream = (containerId) =>

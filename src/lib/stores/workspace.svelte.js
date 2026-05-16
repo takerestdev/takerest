@@ -12,6 +12,7 @@ function createWorkspace() {
   let gitRefreshTick = $state(0);
   let worktreeChangeTick = $state(0);
   let dockerRefreshTick = $state(0);
+  let dirtyTabIds = $state(new Set());
 
   return {
     get activeTool() { return activeTool; },
@@ -38,6 +39,14 @@ function createWorkspace() {
     get worktreeChangeTick() { return worktreeChangeTick; },
     get dockerRefreshTick() { return dockerRefreshTick; },
 
+    get dirtyTabIds() { return dirtyTabIds; },
+
+    setTabDirty(id, dirty) {
+      const next = new Set(dirtyTabIds);
+      if (dirty) next.add(id); else next.delete(id);
+      dirtyTabIds = next;
+    },
+
     openTab(tab) {
       const existing = tabs.find(t => t.id === tab.id);
       if (existing) {
@@ -57,6 +66,12 @@ function createWorkspace() {
         activeTabId = newTabs.length > 0
           ? newTabs[Math.min(idx, newTabs.length - 1)].id
           : null;
+      }
+      // clear any dirty marker for the closed tab
+      if (dirtyTabIds.has(id)) {
+        const next = new Set(dirtyTabIds);
+        next.delete(id);
+        dirtyTabIds = next;
       }
     },
 

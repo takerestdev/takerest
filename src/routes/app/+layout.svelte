@@ -19,8 +19,6 @@
   import Logo from '$lib/components/logo.svelte';
   import Themetoggle from '$lib/components/themetoggle.svelte';
   import * as Tooltip from '$lib/components/ui/tooltip/index.js';
-  import * as Resizable from '$lib/components/ui/resizable/index.js';
-  import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
 
   import EnvPanel from '$lib/components/panels/EnvPanel.svelte';
   import ApiPanel from '$lib/components/panels/ApiPanel.svelte';
@@ -37,6 +35,23 @@
 
   let isWindows = $state(false);
   let appWindow;
+
+  // ── Sidebar resize ─────────────────────────────────────────────────────────
+  let sidebarWidth = $state(280);
+
+  function startSidebarResize(e) {
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const onMove = (e) => {
+      sidebarWidth = Math.max(160, Math.min(600, startW + e.clientX - startX));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
 
   const schema = createSearchParamsSchema({ path: { type: 'string', default: '' } });
   const params = useSearchParams(schema, { pushHistory: false });
@@ -256,58 +271,61 @@
       </Tooltip.Provider>
     </aside>
 
-    <!-- Content: optional secondary sidebar + tab area -->
-    {#if workspace.sidebarOpen && workspace.activeTool}
-      <Resizable.PaneGroup direction="horizontal" class="flex-1 overflow-hidden">
+    <!-- Content: sidebar + tab area in stable flex row.
+         The tab area is ALWAYS in the DOM so mounted components (FileEditor etc.)
+         survive sidebar open/close without losing state. -->
+    <div class="flex flex-1 overflow-hidden min-w-0">
 
-        <!-- Secondary sidebar -->
-        <Resizable.Pane defaultSize={22} minSize={14} maxSize={40}>
-          <div class="h-full flex flex-col border-r overflow-hidden">
-            <div class="flex items-center justify-between px-3 py-2 border-b shrink-0">
-              <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {panelLabels[workspace.activeTool] ?? workspace.activeTool}
-              </span>
-              <button
-                type="button"
-                title="Close panel"
-                onclick={() => (workspace.sidebarOpen = false)}
-                class="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <PanelLeftClose size={14} />
-              </button>
-            </div>
-            <div class="flex-1 overflow-hidden">
-              {#if workspace.activeTool === 'env'}
-                <EnvPanel />
-              {:else if workspace.activeTool === 'api'}
-                <ApiPanel />
-              {:else if workspace.activeTool === 'git'}
-                <GitPanel />
-              {:else if workspace.activeTool !== 'docker'}
-                <StubPanel tool={workspace.activeTool} />
-              {/if}
-              <!-- Docker panel: always mounted while sidebar is open so data loads in
-                   the background and appears instantly when the user switches to it. -->
-              <div class="h-full {workspace.activeTool === 'docker' ? '' : 'hidden'}">
-                <DockerPanel />
-              </div>
+      <!-- Secondary sidebar: enters/leaves DOM freely — no important state here -->
+      {#if workspace.sidebarOpen && workspace.activeTool}
+        <div
+          class="shrink-0 flex flex-col border-r overflow-hidden"
+          style:width="{sidebarWidth}px"
+          style:min-width="160px"
+        >
+          <div class="flex items-center justify-between px-3 py-2 border-b shrink-0">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {panelLabels[workspace.activeTool] ?? workspace.activeTool}
+            </span>
+            <button
+              type="button"
+              title="Close panel"
+              onclick={() => (workspace.sidebarOpen = false)}
+              class="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <PanelLeftClose size={14} />
+            </button>
+          </div>
+          <div class="flex-1 overflow-hidden">
+            {#if workspace.activeTool === 'env'}
+              <EnvPanel />
+            {:else if workspace.activeTool === 'api'}
+              <ApiPanel />
+            {:else if workspace.activeTool === 'git'}
+              <GitPanel />
+            {:else if workspace.activeTool !== 'docker'}
+              <StubPanel tool={workspace.activeTool} />
+            {/if}
+            <div class="h-full {workspace.activeTool === 'docker' ? '' : 'hidden'}">
+              <DockerPanel />
             </div>
           </div>
-        </Resizable.Pane>
+        </div>
 
-        <Resizable.Handle withHandle />
+        <!-- Drag-to-resize handle -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="w-1 shrink-0 bg-border/40 hover:bg-primary/60 cursor-col-resize transition-colors"
+          onmousedown={startSidebarResize}
+        ></div>
+      {/if}
 
-        <!-- Tab area -->
-        <Resizable.Pane defaultSize={78}>
-          {@render tabArea()}
-        </Resizable.Pane>
-
-      </Resizable.PaneGroup>
-    {:else}
-      <div class="flex-1 overflow-hidden flex flex-col">
+      <!-- Tab area: NEVER re-mounts, always at this DOM position -->
+      <div class="flex-1 min-w-0 overflow-hidden flex flex-col">
         {@render tabArea()}
       </div>
-    {/if}
+
+    </div>
 
   </div>
 </div>
@@ -321,6 +339,7 @@
       <div class="flex items-stretch border-b bg-muted/30 shrink-0 overflow-x-auto scrollbar-none">
         {#each workspace.tabs as tab (tab.id)}
           {@const isActive = workspace.activeTabId === tab.id}
+          {@const isDirty = workspace.dirtyTabIds.has(tab.id)}
           {@const TabIcon = tabTypeIcons[tab.type] ?? FileText}
           <!-- Wrapper holds active styling; both buttons are siblings (no nested interactives) -->
           <div
@@ -339,6 +358,9 @@
             >
               <TabIcon size={12} strokeWidth={isActive ? 2.2 : 1.5} />
               <span class="max-w-35 truncate">{tab.title}</span>
+              {#if isDirty}
+                <span class="w-1.5 h-1.5 rounded-full bg-primary shrink-0"></span>
+              {/if}
             </button>
             <button
               type="button"
@@ -360,7 +382,7 @@
       {#each workspace.tabs as tab (tab.id)}
         <div class="absolute inset-0 overflow-hidden {workspace.activeTabId === tab.id ? 'block' : 'hidden'}">
           {#if tab.type === 'readme'}
-            <ReadmeTab data={tab.data} />
+            <ReadmeTab data={tab.data} tabId={tab.id} />
           {:else if tab.type === 'env-file'}
             <EnvTab data={tab.data} tabId={tab.id} />
           {:else if tab.type === 'git-diff'}
@@ -374,7 +396,7 @@
           {:else if tab.type === 'docker-logs'}
             <DockerLogsTab data={tab.data} tabId={tab.id} />
           {:else if tab.type === 'file-edit'}
-            <FileTab data={tab.data} />
+            <FileTab data={tab.data} tabId={tab.id} />
           {/if}
         </div>
       {/each}

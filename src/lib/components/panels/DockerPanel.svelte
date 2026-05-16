@@ -55,9 +55,12 @@
   async function loadAll() {
     if (!projectPath) return;
     error = '';
+    const snapshotPath = projectPath;
 
     // Compose files are project-scoped (FS scan, very fast — always re-fetch)
-    dockerListComposeFiles(projectPath).then(cf => { composeFiles = cf; }).catch(() => {});
+    dockerListComposeFiles(snapshotPath).then(cf => {
+      if (projectPath === snapshotPath) composeFiles = cf;
+    }).catch(() => {});
 
     // Show spinner only on first-ever load (no cache yet)
     if (_cache === null) loading = true;
