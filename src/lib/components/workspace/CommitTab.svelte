@@ -2,7 +2,7 @@
   // @ts-nocheck
   let { data } = $props();
 
-  import { gitCommitFiles, gitDiffCommitFile } from '$lib/commands/git.js';
+  import { gitCommitFiles, gitDiffCommitFile, gitReadBlobAtCommit } from '$lib/commands/git.js';
   import { GitCommit, User, Clock, Hash, Loader2, AlertTriangle } from '@lucide/svelte';
 
   let commit     = $derived(data.commit);
@@ -16,7 +16,9 @@
   // Plain object instead of Map — Svelte 5's object property reactivity is
   // reliable from async callbacks; Map.get() tracking in $derived.by is not.
   // path → null (pending) | { error: string, result: any|null } (settled)
-  let fileDiffs     = $state(Object.create(null));
+  let fileDiffs     = $state({});
+  // path → null (loading) | { error, before, after } (settled image blobs)
+  let imageBlobs    = $state({});
   let activeFileIdx = $state(0);
 
   let scrollEl     = $state(null);
@@ -31,7 +33,7 @@
   let _requested = new Set();
   const MAX_CONCURRENT = 4;
 
-  function resetQueue() { _gen++; _queue = []; _requested = new Set(); }
+  function resetQueue() { _gen++; _queue = []; _inFlight = 0; _requested = new Set(); }
 
   function enqueueFile(file) {
     if (_requested.has(file.path)) return;
@@ -48,20 +50,47 @@
         .then(result => {
           if (gen !== _gen) return;
           fileDiffs[file.path] = { error: '', result };
+          if (result.isImage) fetchImageBlob(file, gen);
         })
         .catch(e => {
           if (gen !== _gen) return;
           fileDiffs[file.path] = { error: e?.message ?? String(e), result: null };
         })
-        .finally(() => { _inFlight--; drain(); });
+        .finally(() => { if (gen === _gen) { _inFlight--; drain(); } });
     }
+  }
+
+  function fetchImageBlob(file, gen) {
+    const kind = fileKind(file);
+    const tasks = [];
+    if (kind !== 'added' && parentHash) {
+      tasks.push(
+        gitReadBlobAtCommit(folderPath, parentHash, file.path)
+          .then(b => ({ before: b }))
+          .catch(() => ({ before: null }))
+      );
+    }
+    if (kind !== 'deleted') {
+      tasks.push(
+        gitReadBlobAtCommit(folderPath, commit.hash, file.path)
+          .then(b => ({ after: b }))
+          .catch(() => ({ after: null }))
+      );
+    }
+    Promise.all(tasks).then(results => {
+      if (gen !== _gen) return;
+      imageBlobs[file.path] = { error: '', ...Object.assign({}, ...results) };
+    }).catch(e => {
+      if (gen !== _gen) return;
+      imageBlobs[file.path] = { error: e?.message ?? String(e), before: null, after: null };
+    });
   }
 
   // ── Load file list on commit change ───────────────────────────────────────
   $effect(() => {
     if (!commit?.hash || !folderPath) return;
     resetQueue();
-    filesLoading = true; filesError = ''; files = []; fileDiffs = Object.create(null);
+    filesLoading = true; filesError = ''; files = []; fileDiffs = {}; imageBlobs = {};
     activeFileIdx = 0; scrollTop = 0;
 
     const gen = _gen;
@@ -70,7 +99,7 @@
         if (gen !== _gen) return;
         // Initialise all as null (pending) before setting files,
         // so allRows sees them immediately when files becomes non-empty.
-        const pending = Object.create(null);
+        const pending = {};
         for (const file of f) pending[file.path] = null;
         fileDiffs = pending;
         files = f;
@@ -86,6 +115,7 @@
   const FILE_H        = 40;
   const ROW_H         = 22;
   const PLACEHOLDER_H = 40;
+  const IMAGE_H       = 320;
   const OVERSCAN_PX   = 400;
   const PRELOAD_AHEAD = 5;
 
@@ -102,6 +132,8 @@
         rows.push({ type: 'error', fi, error: diff.error });
       } else if (diff.result?.isBinary) {
         rows.push({ type: 'binary', fi });
+      } else if (diff.result?.isImage) {
+        rows.push({ type: 'image', fi, file });
       } else if (!diff.result || diff.result.hunks.length === 0) {
         rows.push({ type: 'empty', fi });
       } else {
@@ -123,6 +155,7 @@
       pos[i] = off;
       const r = allRows[i];
       off += r.type === 'file-header' ? FILE_H
+           : r.type === 'image' ? IMAGE_H
            : (r.type === 'loading' || r.type === 'binary' || r.type === 'empty' || r.type === 'error') ? PLACEHOLDER_H
            : ROW_H;
     }
@@ -363,6 +396,61 @@
 
               {:else if row.type === 'binary'}
                 <div class="flex flex-1 items-center px-4 text-muted-foreground/50 font-sans text-xs italic">Binary file changed</div>
+
+              {:else if row.type === 'image'}
+                {@const blob = imageBlobs[row.file.path]}
+                {@const kind = fileKind(row.file)}
+                <div class="flex flex-1 overflow-hidden font-sans">
+                  {#if !blob}
+                    <div class="flex w-full items-center justify-center gap-1.5 text-muted-foreground/40 text-xs">
+                      <Loader2 size={11} class="animate-spin" />Loading image…
+                    </div>
+                  {:else if blob.error}
+                    <div class="flex w-full items-center justify-center gap-2 text-destructive/70 text-xs">
+                      <AlertTriangle size={12} />{blob.error}
+                    </div>
+                  {:else if kind === 'added'}
+                    <div class="flex flex-col items-center justify-center gap-2 w-full py-3">
+                      <p class="text-[11px] text-green-600 dark:text-green-400 font-medium">Added</p>
+                      {#if blob.after}
+                        <img src="data:{blob.after.mime};base64,{blob.after.data}" alt="Added" class="max-h-65 object-contain rounded border shadow-sm" />
+                      {:else}
+                        <span class="text-xs text-muted-foreground">Not available</span>
+                      {/if}
+                    </div>
+                  {:else if kind === 'deleted'}
+                    <div class="flex flex-col items-center justify-center gap-2 w-full py-3">
+                      <p class="text-[11px] text-red-500 font-medium">Deleted</p>
+                      {#if blob.before}
+                        <div class="relative inline-block">
+                          <img src="data:{blob.before.mime};base64,{blob.before.data}" alt="Deleted" class="max-h-65 object-contain rounded border shadow-sm opacity-60" />
+                          <div class="absolute inset-0 bg-red-500/10 rounded border border-red-500/30"></div>
+                        </div>
+                      {:else}
+                        <span class="text-xs text-muted-foreground">Not available</span>
+                      {/if}
+                    </div>
+                  {:else}
+                    <div class="grid grid-cols-2 gap-4 w-full p-4 max-w-4xl mx-auto">
+                      <div class="flex flex-col gap-1.5">
+                        <p class="text-[11px] text-muted-foreground text-center font-medium">Before</p>
+                        {#if blob.before}
+                          <img src="data:{blob.before.mime};base64,{blob.before.data}" alt="Before" class="w-full max-h-65 object-contain rounded border shadow-sm" />
+                        {:else}
+                          <div class="flex items-center justify-center h-20 border rounded text-muted-foreground text-xs">Not available</div>
+                        {/if}
+                      </div>
+                      <div class="flex flex-col gap-1.5">
+                        <p class="text-[11px] text-muted-foreground text-center font-medium">After</p>
+                        {#if blob.after}
+                          <img src="data:{blob.after.mime};base64,{blob.after.data}" alt="After" class="w-full max-h-65 object-contain rounded border shadow-sm" />
+                        {:else}
+                          <div class="flex items-center justify-center h-20 border rounded text-muted-foreground text-xs">Not available</div>
+                        {/if}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
 
               {:else if row.type === 'empty'}
                 <div class="flex flex-1 items-center px-4 text-muted-foreground/50 font-sans text-xs italic">No differences</div>

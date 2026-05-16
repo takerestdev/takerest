@@ -145,6 +145,11 @@ export async function gitReadBlobHead(projectPath, relPath) {
   return invoke("git_read_blob_head", { projectPath, relPath });
 }
 
+/** @returns {Promise<ImageBlob>} */
+export async function gitReadBlobAtCommit(projectPath, commitHash, relPath) {
+  return invoke("git_read_blob_at_commit", { projectPath, commitHash, relPath });
+}
+
 /** @returns {Promise<RemoteStatus>} */
 export async function gitRemoteStatus(projectPath) {
   return invoke("git_remote_status", { projectPath });

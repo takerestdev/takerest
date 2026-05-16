@@ -60,6 +60,7 @@ pub fn run() {
             commands::git::git_diff_commit_file,
             commands::git::git_read_blob_worktree,
             commands::git::git_read_blob_head,
+            commands::git::git_read_blob_at_commit,
             commands::git::git_remote_status,
             commands::git::git_discard_all,
             commands::git::git_discard_file,
