@@ -28,6 +28,7 @@
 
   let _reqId = 0;
   let _debounceTimer = null;
+  let _worktreeFirstRun = true;
 
   let commitOpen = $state(false);
   let abortingMerge = $state(false);
@@ -58,7 +59,10 @@
         .filter(t => t.type === 'git-diff' && !openPaths.has(t.data?.relPath))
         .forEach(t => workspace.closeTab(t.id));
     } catch (e) {
-      if (id === _reqId) error = e?.message ?? String(e);
+      if (id === _reqId) {
+        const msg = e?.message ?? String(e);
+        error = msg.includes('not a git repository') ? 'This folder is not a git repository.' : msg;
+      }
     } finally {
       if (id === _reqId) loading = false;
     }
@@ -80,8 +84,10 @@
   });
 
   // Debounced: worktree file edits can arrive in rapid bursts from the watcher.
+  // Skip the initial mount — the immediate effect above already covers first load.
   $effect(() => {
     workspace.worktreeChangeTick;
+    if (_worktreeFirstRun) { _worktreeFirstRun = false; return; }
     if (projectPath) scheduleLoad();
   });
 
@@ -311,11 +317,11 @@
   <!-- Commit trigger -->
   <div class="border-t shrink-0 p-2">
     <Button
-      class="w-full h-8 text-xs"
+      class="w-full h-8 text-xs overflow-hidden"
       disabled={stagedCount === 0}
       onclick={() => { commitOpen = true; commitError = ''; }}
     >
-      Commit {stagedCount > 0 ? `${stagedCount} staged` : 'staged files'} to {currentBranch}
+      <span class="truncate">Commit {stagedCount > 0 ? `${stagedCount} staged` : 'staged files'} to {currentBranch}</span>
     </Button>
   </div>
 </div>

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Ensures .takerest/ folder exists in the project. Creates it if missing.
+ * Ensures .anide/ folder exists in the project. Creates it if missing.
  * @param {string} projectPath - Absolute path to the project folder
  * @returns {Promise<boolean>} true if it already existed, false if just created
  */
@@ -17,7 +17,7 @@ export async function initProject(projectPath) {
  * @returns {Promise<ProjectInfo>}
  *
  * @typedef {Object} ProjectInfo
- * @property {boolean} takerestInitialized - Whether .takerest/ already existed
+ * @property {boolean} anideInitialized - Whether .anide/ already existed
  * @property {string[]} envFiles - Relative paths to .env files
  * @property {string[]} composeFiles - Relative paths to docker-compose files
  * @property {GitInfo|null} git - Git repo info, or null if not a git repo
@@ -37,7 +37,7 @@ export async function scanProject(projectPath) {
 
 
 /**
- * Save the README.md file in .takerest/ folder
+ * Save the README.md file in .anide/ folder
  * @param {string} projectPath - Absolute path to the project folder
  * @param {string} content - Markdown content to save
  * @returns {Promise<void>}

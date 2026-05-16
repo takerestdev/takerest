@@ -25,7 +25,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 /**
  * List all .env* files found anywhere in the project.
- * Skips node_modules, .git, target, dist, .next, .svelte-kit, .takerest.
+ * Skips node_modules, .git, target, dist, .next, .svelte-kit, .anide.
  *
  * @param {string} projectPath - Absolute path to the project folder
  * @returns {Promise<EnvFile[]>}

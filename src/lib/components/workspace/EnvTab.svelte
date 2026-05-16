@@ -8,7 +8,7 @@
     import { Input } from '$lib/components/ui/input/index.js';
     import {
         Loader2, Save, Trash2, Plus, ShieldCheck, ShieldOff, FileKey, X,
-        Copy, Check,
+        Copy, Check, Eye, EyeOff,
     } from '@lucide/svelte';
     import {
         readEnvFile, writeEnvFile, deleteEnvFile,
@@ -131,6 +131,13 @@
     }
 
     let isDirty = $derived(serializeLines(parsedLines) !== originalContent);
+    let visibleEntries = $state(new Set());
+
+    function toggleVisible(entry) {
+        if (visibleEntries.has(entry)) visibleEntries.delete(entry);
+        else visibleEntries.add(entry);
+        visibleEntries = new Set(visibleEntries);
+    }
 
     /** @type {PairLine | null} */
     let copiedEntry = $state(null);
@@ -156,6 +163,9 @@
             <div class="font-mono text-base font-medium truncate max-w-md">{relPath}</div>
         </div>
         <div class="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onclick={addPair} class="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground">
+                <Plus class="w-3.5 h-3.5" />Add variable
+            </Button>
             <!-- Gitignore toggle: single pill that shows state and toggles on click -->
             {#if fileMeta}
                 <button
@@ -226,16 +236,29 @@
             <div class="text-destructive text-center py-8">{error}</div>
         {:else}
             <div class="max-w-3xl mx-auto">
-                <div class="grid grid-cols-[1fr_2fr_auto_auto] gap-2 items-center text-sm font-medium text-muted-foreground mb-2 px-2">
+                <div class="grid grid-cols-[1fr_2fr_auto_auto_auto] gap-2 items-center text-sm font-medium text-muted-foreground mb-2 px-2">
                     <div>KEY</div>
                     <div>VALUE</div>
                     <div class="w-8"></div>
                     <div class="w-8"></div>
+                    <div class="w-8"></div>
                 </div>
                 {#each pairEntries as entry (entry)}
-                    <div class="grid grid-cols-[1fr_2fr_auto_auto] gap-2 items-center mb-2 group">
+                    <div class="grid grid-cols-[1fr_2fr_auto_auto_auto] gap-2 items-center mb-2 group">
                         <Input bind:value={entry.key} placeholder="KEY_NAME" class="font-mono" />
-                        <Input bind:value={entry.value} placeholder="value here" class="font-mono" />
+                        <Input bind:value={entry.value} placeholder="value here" class="font-mono" type={visibleEntries.has(entry) ? 'text' : 'password'} />
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={visibleEntries.has(entry) ? 'Hide value' : 'Show value'}
+                            onclick={() => toggleVisible(entry)}
+                        >
+                            {#if visibleEntries.has(entry)}
+                                <EyeOff class="w-4 h-4" />
+                            {:else}
+                                <Eye class="w-4 h-4" />
+                            {/if}
+                        </Button>
                         <Button
                             variant="ghost"
                             size="icon"
@@ -259,9 +282,6 @@
                         </Button>
                     </div>
                 {/each}
-                <Button variant="outline" onclick={addPair} class="mt-4 w-full">
-                    <Plus class="w-4 h-4 mr-2" />Add variable
-                </Button>
             </div>
         {/if}
     </div>

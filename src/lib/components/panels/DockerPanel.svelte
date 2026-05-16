@@ -308,7 +308,7 @@
             >
               <span class="shrink-0 w-1.5 h-1.5 rounded-full {stateDot(c.state)}"></span>
 
-              <span class="flex-1 truncate text-[11px] font-mono text-foreground/90">{name}</span>
+              <span class="flex-1 truncate text-[11px] text-foreground/90">{name}</span>
 
               <div
                 class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
@@ -401,7 +401,7 @@
                   title: file.name,
                   data: { projectPath, relPath: file.rel_path, language: 'yaml' },
                 })}
-                class="flex-1 truncate text-left text-[11px] text-foreground/80 font-mono hover:text-foreground transition-colors"
+                class="flex-1 truncate text-left text-[11px] text-foreground/80 hover:text-foreground transition-colors"
                 title={file.rel_path}
               >
                 {file.name}
@@ -457,7 +457,7 @@
             {@const busy = busyIds.has(img.id)}
             <div class="flex items-center gap-1.5 px-3 py-1 group hover:bg-muted/30 transition-colors">
               <div class="flex-1 min-w-0">
-                <p class="truncate text-[11px] font-mono text-foreground/90">{primaryTag(img)}</p>
+                <p class="truncate text-[11px] text-foreground/90">{primaryTag(img)}</p>
                 <p class="text-[10px] text-muted-foreground/60">{fmtBytes(img.size)}</p>
               </div>
               <button

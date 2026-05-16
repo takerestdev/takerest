@@ -60,6 +60,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "anide"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bollard",
+ "futures-util",
+ "gix",
+ "ignore",
+ "imara-diff",
+ "notify-debouncer-full",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-os",
+ "thiserror 2.0.18",
+ "tokio",
+ "urlencoding",
+ "window-vibrancy 0.5.3",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4933,31 +4958,6 @@ dependencies = [
  "pkg-config",
  "toml 0.8.2",
  "version-compare",
-]
-
-[[package]]
-name = "takerest"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "bollard",
- "futures-util",
- "gix",
- "ignore",
- "imara-diff",
- "notify-debouncer-full",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-os",
- "thiserror 2.0.18",
- "tokio",
- "urlencoding",
- "window-vibrancy 0.5.3",
 ]
 
 [[package]]

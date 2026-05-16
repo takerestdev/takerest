@@ -3,6 +3,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+macro_rules! no_window {
+    ($cmd:expr) => {
+        #[cfg(target_os = "windows")]
+        {
+            #[allow(unused_imports)]
+            use std::os::windows::process::CommandExt as _;
+            $cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+    };
+}
+
 use bollard::container::{
     ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions,
     RestartContainerOptions, StartContainerOptions, StopContainerOptions,
@@ -446,23 +457,12 @@ pub async fn docker_compose_down(
 /// 2-second timeout so it fails fast when Docker is starting up or in a bad state.
 #[tauri::command]
 pub async fn docker_ping() -> bool {
-    let Ok(docker) = Docker::connect_with_local_defaults() else {
-        eprintln!("[docker_ping] could not create bollard client");
+    let Ok(docker) = docker_client() else {
         return false;
     };
     match timeout(Duration::from_secs(2), docker.ping()).await {
-        Ok(Ok(_)) => {
-            eprintln!("[docker_ping] OK");
-            true
-        }
-        Ok(Err(e)) => {
-            eprintln!("[docker_ping] API error: {e}");
-            false
-        }
-        Err(_) => {
-            eprintln!("[docker_ping] timeout — daemon not ready yet");
-            false
-        }
+        Ok(Ok(_)) => true,
+        _ => false,
     }
 }
 
@@ -627,13 +627,10 @@ pub fn docker_stop_engine() -> Result<(), AppError> {
 /// Uses `sh -c` so the full shell syntax (pipes, quotes, etc.) works.
 #[tauri::command]
 pub async fn docker_exec_cmd(container_id: String, cmd: String) -> Result<ExecResult, AppError> {
-    let result = timeout(
-        Duration::from_secs(30),
-        tokio::process::Command::new("docker")
-            .args(["exec", &container_id, "sh", "-c", &cmd])
-            .output(),
-    )
-    .await
+    let mut dcmd = tokio::process::Command::new("docker");
+    dcmd.args(["exec", &container_id, "sh", "-c", &cmd]);
+    no_window!(dcmd);
+    let result = timeout(Duration::from_secs(30), dcmd.output()).await
     .map_err(|_| AppError::Other("exec timed out after 30s".into()))?
     .map_err(|e| AppError::Other(format!("docker exec: {e}")))?;
 
@@ -716,11 +713,10 @@ async fn run_compose(
     let mut args = vec!["compose".to_string(), "-f".to_string(), compose_str];
     args.extend(sub_args.iter().map(|s| s.to_string()));
 
-    let output = tokio::process::Command::new("docker")
-        .args(&args)
-        .current_dir(&project_path)
-        .output()
-        .await
+    let mut dcmd = tokio::process::Command::new("docker");
+    dcmd.args(&args).current_dir(&project_path);
+    no_window!(dcmd);
+    let output = dcmd.output().await
         .map_err(|e| AppError::Other(format!("Failed to run docker: {e}")))?;
 
     if output.status.success() {

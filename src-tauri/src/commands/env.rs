@@ -110,7 +110,7 @@ fn collect_env_recursive(
         if path.is_dir() {
             if file_name == "node_modules"
                 || file_name == ".git"
-                || file_name == ".takerest"
+                || file_name == ".anide"
                 || file_name == "target"
                 || file_name == "dist"
                 || file_name == ".next"
