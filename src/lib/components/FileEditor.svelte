@@ -32,6 +32,8 @@
 
   // ── State ──────────────────────────────────────────────────────────────────
   let originalContent = $state('');
+  let savedContent = '';   // plain let — mutable dirty baseline; updated on load and save
+  let loadSeq  = 0;        // request ID to discard out-of-order load() completions
   let loading  = $state(true);
   let saving   = $state(false);
   let error    = $state('');
@@ -51,10 +53,11 @@
     error   = '';
     isDirty = false;
 
+    const req = ++loadSeq;
     untrack(() => load())
-      .then(c  => { originalContent = c; })
-      .catch(e => { error = String(e); })
-      .finally(() => { loading = false; });
+      .then(c  => { if (req === loadSeq) { originalContent = c; savedContent = c; } })
+      .catch(e => { if (req === loadSeq) error = String(e); })
+      .finally(() => { if (req === loadSeq) loading = false; });
   });
 
   // ── Create / recreate editor when content loads ────────────────────────────
@@ -63,25 +66,23 @@
 
     view?.destroy();
 
-    const orig = originalContent;
-
     view = new EditorView({
-      doc: orig,
+      doc: savedContent,
       extensions: [
         basicSetup,
         getLangExt(resolvedLang),
         EditorView.theme({
-          '&':                  { height: '100%', backgroundColor: 'transparent', color: 'hsl(var(--foreground))', fontFamily: 'Geist Mono, ui-monospace, monospace', fontSize: '13px' },
-          '.cm-content':        { padding: '1rem 0.5rem', lineHeight: '1.65' },
-          '.cm-gutters':        { backgroundColor: 'hsl(var(--muted) / 0.3)', color: 'hsl(var(--muted-foreground) / 0.6)', border: 'none' },
-          '.cm-activeLineGutter':{ backgroundColor: 'hsl(var(--muted) / 0.5)' },
-          '.cm-activeLine':     { backgroundColor: 'hsl(var(--muted) / 0.25)' },
-          '.cm-focused':        { outline: 'none' },
-          '.cm-scroller':       { overflow: 'auto' },
+          '&':                   { height: '100%', backgroundColor: 'transparent', color: 'var(--foreground)', fontFamily: 'Geist Mono, ui-monospace, monospace', fontSize: '13px' },
+          '.cm-content':         { padding: '1rem 0.5rem', lineHeight: '1.65' },
+          '.cm-gutters':         { backgroundColor: 'color-mix(in oklch, var(--muted) 30%, transparent)', color: 'color-mix(in oklch, var(--muted-foreground) 60%, transparent)', border: 'none' },
+          '.cm-activeLineGutter':{ backgroundColor: 'color-mix(in oklch, var(--muted) 50%, transparent)' },
+          '.cm-activeLine':      { backgroundColor: 'color-mix(in oklch, var(--muted) 25%, transparent)' },
+          '.cm-focused':         { outline: 'none' },
+          '.cm-scroller':        { overflow: 'auto' },
         }),
         themeCompartment.of(untrack(() => mode.current) === 'dark' ? oneDark : []),
         EditorView.updateListener.of(upd => {
-          if (upd.docChanged) isDirty = upd.state.doc.toString() !== orig;
+          if (upd.docChanged) isDirty = upd.state.doc.toString() !== savedContent;
         }),
       ],
       parent: editorEl,
@@ -115,6 +116,7 @@
       const content = view.state.doc.toString();
       await saveFn(content);
       originalContent = content;
+      savedContent = content;
       isDirty = false;
     } catch (e) {
       error = String(e);
@@ -126,7 +128,7 @@
   // ── Discard ────────────────────────────────────────────────────────────────
   function discard() {
     if (!view) return;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: originalContent } });
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: savedContent } });
     isDirty = false;
   }
 

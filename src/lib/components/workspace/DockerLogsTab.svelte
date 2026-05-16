@@ -102,6 +102,8 @@
   }
 
   function clearLogs() {
+    if (batchFrame !== null) { cancelAnimationFrame(batchFrame); batchFrame = null; }
+    pending.length = 0;
     logs = [];
   }
 

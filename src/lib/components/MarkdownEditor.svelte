@@ -122,6 +122,17 @@
 
   onDestroy(() => { editor?.destroy(); editor = null; });
 
+  // Resync when parent swaps the content prop while the editor is mounted (guard: clean only)
+  $effect(() => {
+    const incoming = cleanMd(initialContent);
+    untrack(() => {
+      if (!editor || isDirty || incoming === originalMd) return;
+      originalMd = incoming;
+      editor.commands.setContent(incoming, { contentType: 'markdown' });
+      isDirty = false;
+    });
+  });
+
   $effect(() => { if (editor) editor.setEditable(!readonly, false); });
 
   $effect(() => {
@@ -426,25 +437,24 @@
   :global(.md-editor .ProseMirror li p) { margin: 0; }
 
   /* ── Task list (checkbox) ─────────────────────────────────────────────────── */
+  /* TipTap puts data-type on the UL, NOT the li — selectors must use ul > li */
   :global(.md-editor .ProseMirror ul[data-type="taskList"]) {
     list-style: none; padding-left: 0.25rem;
   }
-  /* Layout is set via HTMLAttributes inline style — CSS here for specificity backup */
-  :global(.md-editor .ProseMirror li[data-type="taskItem"]) {
+  :global(.md-editor .ProseMirror ul[data-type="taskList"] > li) {
     list-style: none !important;
     display: flex !important;
     align-items: flex-start !important;
     gap: 0.5rem !important;
   }
-  :global(.md-editor .ProseMirror li[data-type="taskItem"] > label) {
+  :global(.md-editor .ProseMirror ul[data-type="taskList"] > li > label) {
     display: flex; align-items: center;
     flex-shrink: 0; cursor: pointer;
     margin-top: 0.3rem;
   }
 
-  /* @tailwindcss/forms uses `color` as the checked background via currentColor.
-     Override to primary so checked state uses theme color instead of Tailwind's blue. */
-  :global(.md-editor .ProseMirror li[data-type="taskItem"] label input[type="checkbox"]) {
+  /* Show the native input; override Tailwind forms' blue with primary */
+  :global(.md-editor .ProseMirror ul[data-type="taskList"] > li > label input[type="checkbox"]) {
     position: static !important;
     opacity: 1 !important;
     width: 0.9rem !important;
@@ -457,23 +467,22 @@
     border-color: color-mix(in oklch, var(--primary) 55%, var(--border)) !important;
   }
 
-  /* Hide the decorative span — input is now visible and styled by Tailwind forms */
-  :global(.md-editor .ProseMirror li[data-type="taskItem"] label span) {
+  /* Hide the decorative span — input is visible and handled by Tailwind forms */
+  :global(.md-editor .ProseMirror ul[data-type="taskList"] > li > label span) {
     display: none !important;
   }
 
-  /* TipTap sets data-checked="true" on the li; use it to directly override the
-     input's checked-state colors (bypasses reliance on CSS :checked pseudo-class) */
-  :global(.md-editor .ProseMirror li[data-type="taskItem"][data-checked="true"] label input[type="checkbox"]) {
+  /* Checked — TipTap sets data-checked="true" on the li, not on the input */
+  :global(.md-editor .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > label input[type="checkbox"]) {
     background-color: var(--primary) !important;
     border-color: var(--primary) !important;
   }
 
-  /* Content area — any direct child that isn't the label */
-  :global(.md-editor .ProseMirror li[data-type="taskItem"] > *:not(label)) {
+  /* Content area */
+  :global(.md-editor .ProseMirror ul[data-type="taskList"] > li > *:not(label)) {
     flex: 1; min-width: 0;
   }
-  :global(.md-editor .ProseMirror li[data-type="taskItem"][data-checked="true"] > *:not(label)) {
+  :global(.md-editor .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > *:not(label)) {
     color: var(--muted-foreground); text-decoration: line-through;
   }
 
