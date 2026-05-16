@@ -44,3 +44,12 @@ export const dockerStartEngine = () =>
 
 export const dockerStopEngine = () =>
   invoke('docker_stop_engine');
+
+export const dockerWatchEvents = () =>
+  invoke('docker_watch_events');
+
+export const dockerStopWatchEvents = () =>
+  invoke('docker_stop_watch_events');
+
+export const dockerExecCmd = (containerId, cmd) =>
+  invoke('docker_exec_cmd', { containerId, cmd });

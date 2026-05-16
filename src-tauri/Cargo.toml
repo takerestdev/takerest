@@ -35,5 +35,5 @@ base64 = "0.22"
 notify-debouncer-full = "0.5"
 bollard = "0.18"
 futures-util = "0.3"
-tokio = { version = "1", features = ["process", "io-util", "time"] }
+tokio = { version = "1", features = ["process", "io-util", "time", "macros"] }
 

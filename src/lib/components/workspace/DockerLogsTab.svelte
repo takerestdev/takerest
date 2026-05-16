@@ -4,8 +4,8 @@
 
   import { listen } from '@tauri-apps/api/event';
   import { workspace } from '$lib/stores/workspace.svelte.js';
-  import { dockerStartLogStream, dockerStopLogStream } from '$lib/commands/docker.js';
-  import { Terminal, Search, X, Trash2, Loader2, ChevronsDown } from '@lucide/svelte';
+  import { dockerStartLogStream, dockerStopLogStream, dockerExecCmd } from '$lib/commands/docker.js';
+  import { Terminal, Search, X, Trash2, ChevronsDown, Clock, Loader2 } from '@lucide/svelte';
 
   let containerId    = $derived(data.containerId);
   let containerName  = $derived(data.containerName);
@@ -13,13 +13,16 @@
   // ── Log state ──────────────────────────────────────────────────────────────
   let logs       = $state([]);   // { timestamp, message, stream }[]
   let searchQuery = $state('');
-  let loading     = $state(false);
-  let streaming   = $state(false);
+  let loading     = $state(true);   // true until first docker:log-end fires
+  let streaming   = false;          // plain var — must NOT be $state (would cause effect loop)
+
+  // ── UI prefs ───────────────────────────────────────────────────────────────
+  let showTimestamps = $state(true);
 
   // ── Active / inactive tracking ─────────────────────────────────────────────
   let isActive = $derived(workspace.activeTabId === tabId);
 
-  let sessionId = 0; // incremented on each activation to cancel stale listeners
+  let sessionId = 0;
 
   $effect(() => {
     if (isActive) {
@@ -42,7 +45,6 @@
     streaming = true;
     atBottom = true;
 
-    // Subscribe to events BEFORE starting stream so we don't miss lines
     unlistenLog = await listen(`docker:log:${containerId}`, (event) => {
       if (sessionId !== mySession) return;
       batchPush(event.payload);
@@ -66,7 +68,7 @@
   async function deactivate() {
     if (!streaming) return;
     streaming = false;
-    sessionId++; // invalidate any pending async work
+    sessionId++;
 
     unlistenLog?.();
     unlistenEnd?.();
@@ -77,7 +79,7 @@
     loading = false;
   }
 
-  // ── Log batching (collapse rapid bursts into one tick) ─────────────────────
+  // ── Log batching ──────────────────────────────────────────────────────────
   let pending = [];
   let batchFrame = null;
 
@@ -86,14 +88,15 @@
     if (!batchFrame) {
       batchFrame = requestAnimationFrame(() => {
         batchFrame = null;
-        const batch = pending;
-        pending = [];
-        for (const l of batch) {
-          if (logs.length >= 20_000) logs.splice(0, 1);
-          logs.push(l);
-        }
-        if (atBottom && scrollEl) {
-          scrollEl.scrollTop = scrollEl.scrollHeight;
+        const batch = pending.splice(0);
+        const combined = [...logs, ...batch];
+        logs = combined.length > 20_000
+          ? combined.slice(combined.length - 20_000)
+          : combined;
+        if (atBottom) {
+          requestAnimationFrame(() => {
+            if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+          });
         }
       });
     }
@@ -149,6 +152,38 @@
     } catch { return ts.slice(11, 23); }
   }
 
+  // ── Exec command ──────────────────────────────────────────────────────────
+  let cmdInput   = $state('');
+  let cmdRunning = $state(false);
+
+  async function execCmd() {
+    const cmd = cmdInput.trim();
+    if (!cmd || cmdRunning) return;
+    cmdInput = '';
+    cmdRunning = true;
+
+    const ts = new Date().toISOString();
+    batchPush({ timestamp: ts, message: `$ ${cmd}`, stream: 'cmd' });
+
+    try {
+      const result = await dockerExecCmd(containerId, cmd);
+      if (result.stdout) {
+        for (const line of result.stdout.split('\n')) {
+          batchPush({ timestamp: ts, message: line, stream: 'stdout' });
+        }
+      }
+      if (result.stderr) {
+        for (const line of result.stderr.split('\n')) {
+          batchPush({ timestamp: ts, message: line, stream: 'stderr' });
+        }
+      }
+    } catch (e) {
+      batchPush({ timestamp: ts, message: `[exec error: ${e}]`, stream: 'stderr' });
+    } finally {
+      cmdRunning = false;
+    }
+  }
+
   // ── Search highlight (XSS-safe) ────────────────────────────────────────────
   function escHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -165,20 +200,25 @@
   }
 </script>
 
-<div class="h-full flex flex-col overflow-hidden font-mono text-[12px] leading-5 bg-background">
+<div class="h-full flex flex-col overflow-hidden font-mono text-[12px] leading-5 bg-background relative">
 
   <!-- Header -->
   <div class="flex items-center gap-2 px-3 py-1.5 border-b shrink-0 font-sans">
     <Terminal size={13} class="text-muted-foreground shrink-0" />
     <span class="text-sm font-medium flex-1 truncate">{containerName}</span>
 
-    {#if loading}
-      <Loader2 size={12} class="animate-spin text-muted-foreground shrink-0" />
-    {/if}
-
     <span class="text-[10px] text-muted-foreground shrink-0">
       {searchQuery ? `${filteredLogs.length} / ${logs.length}` : logs.length} lines
     </span>
+
+    <button
+      type="button"
+      title={showTimestamps ? 'Hide timestamps' : 'Show timestamps'}
+      onclick={() => (showTimestamps = !showTimestamps)}
+      class="transition-colors shrink-0 {showTimestamps ? 'text-foreground/60' : 'text-muted-foreground/30'}"
+    >
+      <Clock size={12} />
+    </button>
 
     <button
       type="button"
@@ -197,7 +237,7 @@
       type="text"
       placeholder="Search logs…"
       bind:value={searchQuery}
-      class="w-full h-7 pl-8 pr-8 bg-transparent text-[12px] font-mono text-foreground placeholder:text-muted-foreground/50 outline-none"
+      class="w-full h-7 pl-8 pr-8 bg-transparent text-[12px] font-mono text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-0 border-0 focus:border-0"
     />
     {#if searchQuery}
       <button
@@ -214,56 +254,85 @@
   <div
     bind:this={scrollEl}
     bind:clientHeight={clientH}
-    class="flex-1 overflow-auto"
+    class="flex-1 overflow-auto relative"
     onscroll={onScroll}
   >
     <div style="height:{totalHeight}px; position:relative; min-width:100%;">
       {#each visibleRows as row (row.top)}
         <div
           style="position:absolute; top:{row.top}px; left:0; right:0; height:{ROW_H}px;"
-          class="flex items-start px-3 gap-3 hover:bg-muted/20 transition-colors"
+          class="flex items-start px-3 {showTimestamps ? 'gap-2' : ''} hover:bg-muted/20 transition-colors"
         >
-          <!-- Timestamp -->
-          <span class="shrink-0 text-[10px] text-muted-foreground/50 select-none tabular-nums w-28 pt-px">
-            {fmtTs(row.timestamp)}
-          </span>
-          <!-- Message -->
+          {#if showTimestamps}
+            <span class="shrink-0 text-[10px] text-muted-foreground/50 select-none tabular-nums w-18.5 pt-px">
+              {fmtTs(row.timestamp)}
+            </span>
+          {/if}
           <span
             class="flex-1 whitespace-nowrap overflow-hidden text-ellipsis
-              {row.stream === 'stderr' ? 'text-red-400/90' : 'text-foreground/85'}"
+              {row.stream === 'stderr' ? 'text-red-400/90' : row.stream === 'cmd' ? 'text-cyan-400/80 font-semibold' : 'text-foreground/85'}"
           >
             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
             {@html highlight(row.message, searchQuery)}
           </span>
         </div>
       {/each}
-
-      {#if filteredLogs.length === 0}
-        <div class="absolute inset-0 flex items-center justify-center text-muted-foreground/40 font-sans text-sm">
-          {#if loading}
-            Fetching logs…
-          {:else if searchQuery}
-            No matches for "{searchQuery}"
-          {:else}
-            No logs yet
-          {/if}
-        </div>
-      {/if}
     </div>
+
+    <!-- Empty state — positioned relative to the scroll container, not the 0-height inner div -->
+    {#if filteredLogs.length === 0}
+      <div class="absolute inset-0 flex items-center justify-center text-muted-foreground/35 font-sans text-[11px] select-none">
+        {#if loading}
+          connecting…
+        {:else if searchQuery}
+          no matches for "{searchQuery}"
+        {:else}
+          no logs
+        {/if}
+      </div>
+    {/if}
   </div>
 
-  <!-- Scroll-to-bottom button when user has scrolled up -->
+  <!-- Scroll-to-bottom button -->
   {#if !atBottom && logs.length > 0}
     <button
       type="button"
       onclick={scrollToBottom}
-      class="absolute bottom-4 right-4 flex items-center gap-1.5 px-2.5 py-1 rounded-full
+      class="absolute bottom-16 right-4 flex items-center gap-1.5 px-2.5 py-1 rounded-full
         bg-primary text-primary-foreground text-[11px] font-sans shadow-lg hover:opacity-90 transition-opacity"
     >
       <ChevronsDown size={12} />
       <span>Jump to bottom</span>
     </button>
   {/if}
+
+  <!-- Command input bar -->
+  <div class="flex items-center gap-2 px-3 py-1.5 border-t shrink-0 bg-muted/20">
+    <span class="text-cyan-400/80 select-none shrink-0">$</span>
+    <input
+      type="text"
+      placeholder="exec command…"
+      bind:value={cmdInput}
+      disabled={cmdRunning}
+      onkeydown={(e) => e.key === 'Enter' && execCmd()}
+      class="flex-1 bg-transparent text-[12px] font-mono text-foreground placeholder:text-muted-foreground/40
+        outline-none focus:ring-0 border-0 focus:border-0 disabled:opacity-50"
+    />
+    <button
+      type="button"
+      onclick={execCmd}
+      disabled={!cmdInput.trim() || cmdRunning}
+      class="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-sans
+        bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors
+        disabled:opacity-40 disabled:cursor-not-allowed"
+    >
+      {#if cmdRunning}
+        <Loader2 size={11} class="animate-spin" />
+      {:else}
+        Run
+      {/if}
+    </button>
+  </div>
 
 </div>
 

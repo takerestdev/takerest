@@ -1,43 +1,47 @@
+<script module>
+  // Persists across mount/unmount — survives tool-switching and sidebar close/reopen.
+  // null = never loaded this session; set after first successful fetch.
+  let _cache = null;
+</script>
+
 <script>
   // @ts-nocheck
   import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
   import { workspace } from '$lib/stores/workspace.svelte.js';
   import {
     dockerListContainers, dockerListImages, dockerListComposeFiles,
     dockerContainerStart, dockerContainerStop, dockerContainerRestart,
     dockerContainerRemove, dockerImageRemove,
     dockerComposeUp, dockerComposeDown,
-    dockerPing, dockerStartEngine, dockerStopEngine,
+    dockerPing,
+    dockerWatchEvents, dockerStopWatchEvents,
   } from '$lib/commands/docker.js';
   import {
     Play, Square, RefreshCw, Trash2, ChevronDown, ChevronRight,
-    Loader2, AlertCircle, ArrowUp, ArrowDown, Terminal, PowerOff, Power,
+    Loader2, AlertCircle, ArrowUp, ArrowDown, Terminal,
   } from '@lucide/svelte';
-  import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
 
   let projectPath = $derived(workspace.folderPath);
 
-  // Section open/close
-  let composeOpen = $state(true);
+  // Section open/close — containers first and open; compose/images secondary and closed
   let containersOpen = $state(true);
-  let imagesOpen = $state(true);
+  let composeOpen    = $state(false);
+  let imagesOpen     = $state(false);
 
-  // Data
+  // Data — hydrated from cache immediately so UI is instant on remount
   let composeFiles = $state([]);
-  let containers = $state([]);
-  let images = $state([]);
+  let containers   = $state(_cache?.containers ?? []);
+  let images       = $state(_cache?.images ?? []);
+  let imagesLoaded = false; // tracks whether images have been fetched this instance
 
-  // Loading/error
-  let loading = $state(false);
-  let error = $state('');
+  // Spinner only when there's truly nothing to show yet
+  let loading = $state(_cache === null);
+  let error   = $state('');
 
-  // Engine status: null = unknown, true = running, false = stopped
-  let engineRunning = $state(null);
-  let engineBusy = $state(false);
-  let engineStarting = $state(false); // distinct from busy — means we're waiting for daemon
-  let engineStartElapsed = $state(0); // seconds since start was clicked
+  // Engine
+  let engineRunning    = $state(_cache?.engineRunning ?? null);
 
-  // Per-item busy state (keyed by id/path)
   let busyIds = $state(new Set());
 
   function setBusy(id, val) {
@@ -46,125 +50,109 @@
       : new Set([...busyIds].filter(x => x !== id));
   }
 
+  // ── Data loading ──────────────────────────────────────────────────────────
+
   async function loadAll() {
     if (!projectPath) return;
-    loading = true;
     error = '';
 
-    // Compose file scan is purely filesystem — runs regardless of Docker status
-    dockerListComposeFiles(projectPath)
-      .then(cf => { composeFiles = cf; })
-      .catch(() => {});
+    // Compose files are project-scoped (FS scan, very fast — always re-fetch)
+    dockerListComposeFiles(projectPath).then(cf => { composeFiles = cf; }).catch(() => {});
 
-    // Quick ping first so we know engine state immediately
-    engineRunning = await dockerPing();
+    // Show spinner only on first-ever load (no cache yet)
+    if (_cache === null) loading = true;
 
-    if (engineRunning) {
-      try {
-        const [c, imgs] = await Promise.all([
-          dockerListContainers(),
-          dockerListImages().catch(() => []),
-        ]);
-        containers = c;
-        images = imgs;
-      } catch (e) {
-        engineRunning = false;
-        error = e?.toString?.() ?? String(e);
-      }
-    } else {
+    // Reset images so they re-fetch when section is open
+    imagesLoaded = false;
+
+    try {
+      const c = await dockerListContainers();
+      containers = c;
+      engineRunning = true;
+      _cache = { containers: c, images: _cache?.images ?? [], engineRunning: true };
+      error = '';
+    } catch {
       containers = [];
-      images = [];
+      engineRunning = false;
+      _cache = { containers: [], images: [], engineRunning: false };
     }
 
     loading = false;
-  }
 
-  async function pollTick() {
-    if (!projectPath) return;
-    const alive = await dockerPing();
-    if (alive !== engineRunning) {
-      engineRunning = alive;
-      if (alive) void loadAll(); // engine came back online — refresh everything
-    }
-    if (alive) {
-      try { containers = await dockerListContainers(); } catch { /* silent */ }
+    // If images section is already open, refresh images now
+    if (imagesOpen && engineRunning) {
+      imagesLoaded = true;
+      void loadImages();
     }
   }
 
-  async function startEngine() {
-    engineBusy = true;
-    engineStarting = false;
-    engineStartElapsed = 0;
-    error = '';
-
-    // Real wall-clock timer — accurate regardless of how long each ping takes
-    const t0 = Date.now();
-    const clockTimer = setInterval(() => {
-      engineStartElapsed = Math.floor((Date.now() - t0) / 1000);
-    }, 500);
-
+  async function loadImages() {
     try {
-      await dockerStartEngine();
-
-      // Docker Desktop with WSL2 backend can take 60-90 seconds to fully initialize
-      engineStarting = true;
-      let started = false;
-      const deadline = Date.now() + 120_000; // 2 minute hard cap
-
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 2000));
-        if (await dockerPing()) {
-          engineRunning = true;
-          engineStarting = false;
-          void loadAll();
-          started = true;
-          break;
-        }
-      }
-
-      if (!started) {
-        engineRunning = await dockerPing();
-        engineStarting = false;
-        error = `Docker did not respond after ${engineStartElapsed}s. Check Docker Desktop manually.`;
-      }
-    } catch (e) {
-      engineStarting = false;
-      error = e?.toString?.() ?? String(e);
-    } finally {
-      clearInterval(clockTimer);
-      engineStartElapsed = 0;
-      engineBusy = false;
-    }
+      const imgs = await dockerListImages();
+      images = imgs;
+      if (_cache) _cache = { ..._cache, images: imgs };
+    } catch {}
   }
 
-  async function stopEngine() {
-    engineBusy = true;
-    error = '';
-    try {
-      await dockerStopEngine();
-      await new Promise(r => setTimeout(r, 2000));
-      engineRunning = await dockerPing();
-      if (!engineRunning) { containers = []; images = []; }
-    } catch (e) {
-      error = e?.toString?.() ?? String(e);
-    } finally {
-      engineBusy = false;
+  // Lazy-load images when the section is first opened
+  $effect(() => {
+    if (imagesOpen && !imagesLoaded && engineRunning === true) {
+      imagesLoaded = true;
+      void loadImages();
     }
-  }
-
-  onMount(() => {
-    void loadAll();
-    const interval = setInterval(() => void pollTick(), 4000);
-    return () => clearInterval(interval);
   });
 
-  // Reload when workspace switches project
+  async function loadContainers() {
+    if (!engineRunning) return;
+    try {
+      const c = await dockerListContainers();
+      containers = c;
+      if (_cache) _cache = { ..._cache, containers: c };
+      if (imagesOpen) void loadImages();
+    } catch {}
+  }
+
+  // ── Docker event watch — replaces polling ────────────────────────────────
+  let unlistenDockerEvent = null;
+  let eventRefreshTimer   = null;
+
+  async function startEventWatch() {
+    unlistenDockerEvent?.();
+    unlistenDockerEvent = null;
+    unlistenDockerEvent = await listen('docker:event', () => {
+      clearTimeout(eventRefreshTimer);
+      eventRefreshTimer = setTimeout(() => void loadContainers(), 300);
+    });
+    try { await dockerWatchEvents(); } catch {}
+  }
+
+  function stopEventWatch() {
+    clearTimeout(eventRefreshTimer);
+    unlistenDockerEvent?.();
+    unlistenDockerEvent = null;
+    void dockerStopWatchEvents().catch(() => {});
+  }
+
+  $effect(() => {
+    if (engineRunning === true)  void startEventWatch();
+    else if (engineRunning === false) stopEventWatch();
+  });
+
+  // ── Engine start / stop — disabled, unreliable on Windows ───────────────
+  // async function startEngine() { ... }
+  // async function stopEngine() { ... }
+
+  // Initial load + reload when project changes
   $effect(() => {
     projectPath;
     void loadAll();
   });
 
-  // ── Container actions ──────────────────────────────────────────────────────
+  onMount(() => {
+    return () => stopEventWatch();
+  });
+
+  // ── Container actions ─────────────────────────────────────────────────────
 
   async function containerAction(id, fn) {
     setBusy(id, true);
@@ -189,21 +177,18 @@
     });
   }
 
-  // ── Image actions ──────────────────────────────────────────────────────────
-
   async function removeImage(img) {
     setBusy(img.id, true);
     try {
       await dockerImageRemove(img.id, false);
       images = images.filter(i => i.id !== img.id);
+      if (_cache) _cache = { ..._cache, images };
     } catch (e) {
       error = e?.toString?.() ?? String(e);
     } finally {
       setBusy(img.id, false);
     }
   }
-
-  // ── Compose actions ────────────────────────────────────────────────────────
 
   async function composeAction(file, fn) {
     setBusy(file.rel_path, true);
@@ -219,12 +204,7 @@
     }
   }
 
-  async function loadContainers() {
-    if (!engineRunning) return;
-    try { containers = await dockerListContainers(); } catch { /* silent */ }
-  }
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   function stateDot(state) {
     switch (state) {
@@ -272,40 +252,12 @@
     {#if engineRunning === null}
       <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse shrink-0"></span>
       <span class="text-[11px] text-muted-foreground flex-1">Checking…</span>
-    {:else if engineStarting}
-      <span class="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0"></span>
-      <span class="text-[11px] text-yellow-400/80 flex-1">
-        Starting Docker…{engineStartElapsed > 0 ? ` (${engineStartElapsed}s)` : ''}
-      </span>
-      <Loader2 size={11} class="animate-spin text-muted-foreground shrink-0" />
     {:else if engineRunning}
       <span class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></span>
       <span class="text-[11px] text-foreground/70 flex-1">Engine running</span>
-      <button
-        type="button"
-        title="Stop Docker engine"
-        disabled={engineBusy}
-        onclick={stopEngine}
-        class="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-muted-foreground
-               hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
-      >
-        {#if engineBusy}<Loader2 size={10} class="animate-spin" />{:else}<PowerOff size={10} />{/if}
-        Stop
-      </button>
     {:else}
       <span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
       <span class="text-[11px] text-muted-foreground flex-1">Engine stopped</span>
-      <button
-        type="button"
-        title="Start Docker engine"
-        disabled={engineBusy}
-        onclick={startEngine}
-        class="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-green-500
-               hover:bg-green-500/15 transition-colors disabled:opacity-40"
-      >
-        {#if engineBusy}<Loader2 size={10} class="animate-spin" />{:else}<Power size={10} />{/if}
-        Start
-      </button>
     {/if}
   </div>
 
@@ -317,217 +269,207 @@
     </div>
   {/if}
 
-  <ScrollArea class="flex-1">
-    <div class="pb-3">
+  <!-- ── CONTAINERS — takes all remaining space, scrolls internally ───────── -->
+  <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+    <button
+      type="button"
+      onclick={() => (containersOpen = !containersOpen)}
+      class="w-full flex items-center gap-1.5 px-3 py-1.5 border-b hover:bg-muted/40 transition-colors shrink-0"
+    >
+      {#if containersOpen}
+        <ChevronDown size={11} class="text-muted-foreground shrink-0" />
+      {:else}
+        <ChevronRight size={11} class="text-muted-foreground shrink-0" />
+      {/if}
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Containers ({containers.length})
+      </span>
+    </button>
 
-      <!-- ── COMPOSE section ─────────────────────────────────────────────── -->
-      <div class="border-b">
-        <button
-          type="button"
-          onclick={() => (composeOpen = !composeOpen)}
-          class="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-muted/40 transition-colors"
-        >
-          {#if composeOpen}
-            <ChevronDown size={11} class="text-muted-foreground shrink-0" />
-          {:else}
-            <ChevronRight size={11} class="text-muted-foreground shrink-0" />
-          {/if}
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Compose ({composeFiles.length})
-          </span>
-        </button>
+    {#if containersOpen}
+      <div class="flex-1 overflow-y-auto">
+        {#if containers.length === 0 && !loading}
+          <p class="px-6 py-2 text-[11px] text-muted-foreground/60">No containers</p>
+        {:else}
+          {#each containers as c (c.id)}
+            {@const busy = busyIds.has(c.id)}
+            {@const running = c.state === 'running'}
+            {@const name = c.names[0] ?? c.short_id}
+            <div
+              class="flex items-center gap-1.5 px-3 py-1 group hover:bg-muted/30 transition-colors cursor-pointer"
+              role="button"
+              tabindex="0"
+              title="{c.image}\n{c.status}"
+              onclick={() => openLogsTab(c)}
+              onkeydown={(e) => e.key === 'Enter' && openLogsTab(c)}
+            >
+              <span class="shrink-0 w-1.5 h-1.5 rounded-full {stateDot(c.state)}"></span>
 
-        {#if composeOpen}
-          {#if composeFiles.length === 0}
-            <p class="px-6 pb-2 text-[11px] text-muted-foreground/60">No compose files found</p>
-          {:else}
-            {#each composeFiles as file (file.rel_path)}
-              {@const busy = busyIds.has(file.rel_path)}
-              <div class="flex items-center gap-1 px-3 py-1 group hover:bg-muted/30 transition-colors">
-                <button
-                  type="button"
-                  onclick={() => workspace.openTab({
-                    id: `file-edit::${file.rel_path}`,
-                    type: 'file-edit',
-                    title: file.name,
-                    data: { projectPath, relPath: file.rel_path, language: 'yaml' },
-                  })}
-                  class="flex-1 truncate text-left text-[11px] text-foreground/80 font-mono hover:text-foreground transition-colors"
-                  title={file.rel_path}
-                >
-                  {file.name}
-                </button>
-                <!-- Up -->
-                <button
-                  type="button"
-                  title="docker compose up -d"
-                  disabled={busy}
-                  onclick={() => composeAction(file, () => dockerComposeUp(projectPath, file.rel_path))}
-                  class="flex items-center justify-center w-5 h-5 rounded text-green-500 hover:bg-green-500/15 transition-colors disabled:opacity-40"
-                >
-                  {#if busy}
-                    <Loader2 size={11} class="animate-spin" />
-                  {:else}
-                    <ArrowUp size={11} />
-                  {/if}
-                </button>
-                <!-- Down -->
-                <button
-                  type="button"
-                  title="docker compose down"
-                  disabled={busy}
-                  onclick={() => composeAction(file, () => dockerComposeDown(projectPath, file.rel_path))}
-                  class="flex items-center justify-center w-5 h-5 rounded text-red-400 hover:bg-red-500/15 transition-colors disabled:opacity-40"
-                >
-                  {#if busy}
-                    <Loader2 size={11} class="animate-spin" />
-                  {:else}
-                    <ArrowDown size={11} />
-                  {/if}
-                </button>
-              </div>
-            {/each}
-          {/if}
-        {/if}
-      </div>
+              <span class="flex-1 truncate text-[11px] font-mono text-foreground/90">{name}</span>
 
-      <!-- ── CONTAINERS section ──────────────────────────────────────────── -->
-      <div class="border-b">
-        <button
-          type="button"
-          onclick={() => (containersOpen = !containersOpen)}
-          class="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-muted/40 transition-colors"
-        >
-          {#if containersOpen}
-            <ChevronDown size={11} class="text-muted-foreground shrink-0" />
-          {:else}
-            <ChevronRight size={11} class="text-muted-foreground shrink-0" />
-          {/if}
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Containers ({containers.length})
-          </span>
-        </button>
-
-        {#if containersOpen}
-          {#if containers.length === 0 && !loading}
-            <p class="px-6 pb-2 text-[11px] text-muted-foreground/60">No containers</p>
-          {:else}
-            {#each containers as c (c.id)}
-              {@const busy = busyIds.has(c.id)}
-              {@const running = c.state === 'running'}
-              {@const name = c.names[0] ?? c.short_id}
-              <div class="flex items-center gap-1.5 px-3 py-1 group hover:bg-muted/30 transition-colors">
-                <!-- Status dot -->
-                <span class="shrink-0 w-1.5 h-1.5 rounded-full {stateDot(c.state)}"></span>
-
-                <!-- Name (click = open logs) -->
-                <button
-                  type="button"
-                  onclick={() => openLogsTab(c)}
-                  title="{c.image}\n{c.status}"
-                  class="flex-1 text-left truncate text-[11px] font-mono text-foreground/90 hover:text-foreground transition-colors"
-                >{name}</button>
-
-                <!-- Actions (visible on hover) -->
-                <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <!-- Start / Stop -->
-                  {#if running}
-                    <button
-                      type="button" title="Stop"
-                      disabled={busy}
-                      onclick={() => containerAction(c.id, () => dockerContainerStop(c.id))}
-                      class="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-                    >
-                      {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<Square size={11} />{/if}
-                    </button>
-                  {:else}
-                    <button
-                      type="button" title="Start"
-                      disabled={busy}
-                      onclick={() => containerAction(c.id, () => dockerContainerStart(c.id))}
-                      class="flex items-center justify-center w-5 h-5 rounded text-green-500 hover:bg-green-500/15 transition-colors disabled:opacity-40"
-                    >
-                      {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<Play size={11} />{/if}
-                    </button>
-                  {/if}
-
-                  <!-- Restart -->
+              <div
+                class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
+                onclick={(e) => e.stopPropagation()}
+                onkeydown={(e) => e.stopPropagation()}
+              >
+                {#if running}
                   <button
-                    type="button" title="Restart"
+                    type="button" title="Stop"
                     disabled={busy}
-                    onclick={() => containerAction(c.id, () => dockerContainerRestart(c.id))}
+                    onclick={() => containerAction(c.id, () => dockerContainerStop(c.id))}
                     class="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
                   >
-                    <RefreshCw size={11} />
+                    {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<Square size={11} />{/if}
                   </button>
-
-                  <!-- Logs tab -->
+                {:else}
                   <button
-                    type="button" title="Open logs"
-                    onclick={() => openLogsTab(c)}
-                    class="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  >
-                    <Terminal size={11} />
-                  </button>
-
-                  <!-- Remove -->
-                  <button
-                    type="button" title="Remove"
+                    type="button" title="Start"
                     disabled={busy}
-                    onclick={() => containerAction(c.id, () => dockerContainerRemove(c.id, true))}
-                    class="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
+                    onclick={() => containerAction(c.id, () => dockerContainerStart(c.id))}
+                    class="flex items-center justify-center w-5 h-5 rounded text-green-500 hover:bg-green-500/15 transition-colors disabled:opacity-40"
                   >
-                    <Trash2 size={11} />
+                    {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<Play size={11} />{/if}
                   </button>
-                </div>
-              </div>
-            {/each}
-          {/if}
-        {/if}
-      </div>
+                {/if}
 
-      <!-- ── IMAGES section ──────────────────────────────────────────────── -->
-      <div>
-        <button
-          type="button"
-          onclick={() => (imagesOpen = !imagesOpen)}
-          class="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-muted/40 transition-colors"
-        >
-          {#if imagesOpen}
-            <ChevronDown size={11} class="text-muted-foreground shrink-0" />
-          {:else}
-            <ChevronRight size={11} class="text-muted-foreground shrink-0" />
-          {/if}
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Images ({images.length})
-          </span>
-        </button>
-
-        {#if imagesOpen}
-          {#if images.length === 0}
-            <p class="px-6 pb-2 text-[11px] text-muted-foreground/60">No images</p>
-          {:else}
-            {#each images as img (img.id)}
-              {@const busy = busyIds.has(img.id)}
-              <div class="flex items-center gap-1.5 px-3 py-1 group hover:bg-muted/30 transition-colors">
-                <div class="flex-1 min-w-0">
-                  <p class="truncate text-[11px] font-mono text-foreground/90">{primaryTag(img)}</p>
-                  <p class="text-[10px] text-muted-foreground/60">{fmtBytes(img.size)}</p>
-                </div>
                 <button
-                  type="button" title="Remove image"
+                  type="button" title="Restart"
                   disabled={busy}
-                  onclick={() => removeImage(img)}
-                  class="flex items-center justify-center w-5 h-5 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all disabled:opacity-40"
+                  onclick={() => containerAction(c.id, () => dockerContainerRestart(c.id))}
+                  class="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
                 >
-                  {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<Trash2 size={11} />{/if}
+                  <RefreshCw size={11} />
+                </button>
+
+                <button
+                  type="button" title="Open logs"
+                  onclick={() => openLogsTab(c)}
+                  class="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <Terminal size={11} />
+                </button>
+
+                <button
+                  type="button" title="Remove"
+                  disabled={busy}
+                  onclick={() => containerAction(c.id, () => dockerContainerRemove(c.id, true))}
+                  class="flex items-center justify-center w-5 h-5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
+                >
+                  <Trash2 size={11} />
                 </button>
               </div>
-            {/each}
-          {/if}
+            </div>
+          {/each}
         {/if}
       </div>
+    {/if}
+  </div>
 
-    </div>
-  </ScrollArea>
+  <!-- ── COMPOSE — pinned to bottom, expands upward ────────────────────────── -->
+  <div class="shrink-0 border-t">
+    <button
+      type="button"
+      onclick={() => (composeOpen = !composeOpen)}
+      class="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-muted/40 transition-colors"
+    >
+      {#if composeOpen}
+        <ChevronDown size={11} class="text-muted-foreground shrink-0" />
+      {:else}
+        <ChevronRight size={11} class="text-muted-foreground shrink-0" />
+      {/if}
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Compose ({composeFiles.length})
+      </span>
+    </button>
+
+    {#if composeOpen}
+      <div class="overflow-y-auto max-h-44">
+        {#if composeFiles.length === 0}
+          <p class="px-6 pb-2 text-[11px] text-muted-foreground/60">No compose files found</p>
+        {:else}
+          {#each composeFiles as file (file.rel_path)}
+            {@const busy = busyIds.has(file.rel_path)}
+            <div class="flex items-center gap-1 px-3 py-1 group hover:bg-muted/30 transition-colors">
+              <button
+                type="button"
+                onclick={() => workspace.openTab({
+                  id: `file-edit::${file.rel_path}`,
+                  type: 'file-edit',
+                  title: file.name,
+                  data: { projectPath, relPath: file.rel_path, language: 'yaml' },
+                })}
+                class="flex-1 truncate text-left text-[11px] text-foreground/80 font-mono hover:text-foreground transition-colors"
+                title={file.rel_path}
+              >
+                {file.name}
+              </button>
+              <button
+                type="button"
+                title="docker compose up -d"
+                disabled={busy}
+                onclick={() => composeAction(file, () => dockerComposeUp(projectPath, file.rel_path))}
+                class="flex items-center justify-center w-5 h-5 rounded text-green-500 hover:bg-green-500/15 transition-colors disabled:opacity-40"
+              >
+                {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<ArrowUp size={11} />{/if}
+              </button>
+              <button
+                type="button"
+                title="docker compose down"
+                disabled={busy}
+                onclick={() => composeAction(file, () => dockerComposeDown(projectPath, file.rel_path))}
+                class="flex items-center justify-center w-5 h-5 rounded text-red-400 hover:bg-red-500/15 transition-colors disabled:opacity-40"
+              >
+                {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<ArrowDown size={11} />{/if}
+              </button>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  <!-- ── IMAGES — pinned to bottom ─────────────────────────────────────────── -->
+  <div class="shrink-0 border-t">
+    <button
+      type="button"
+      onclick={() => (imagesOpen = !imagesOpen)}
+      class="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-muted/40 transition-colors"
+    >
+      {#if imagesOpen}
+        <ChevronDown size={11} class="text-muted-foreground shrink-0" />
+      {:else}
+        <ChevronRight size={11} class="text-muted-foreground shrink-0" />
+      {/if}
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Images ({images.length})
+      </span>
+    </button>
+
+    {#if imagesOpen}
+      <div class="overflow-y-auto max-h-44">
+        {#if images.length === 0}
+          <p class="px-6 pb-2 text-[11px] text-muted-foreground/60">No images</p>
+        {:else}
+          {#each images as img (img.id)}
+            {@const busy = busyIds.has(img.id)}
+            <div class="flex items-center gap-1.5 px-3 py-1 group hover:bg-muted/30 transition-colors">
+              <div class="flex-1 min-w-0">
+                <p class="truncate text-[11px] font-mono text-foreground/90">{primaryTag(img)}</p>
+                <p class="text-[10px] text-muted-foreground/60">{fmtBytes(img.size)}</p>
+              </div>
+              <button
+                type="button" title="Remove image"
+                disabled={busy}
+                onclick={() => removeImage(img)}
+                class="flex items-center justify-center w-5 h-5 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all disabled:opacity-40"
+              >
+                {#if busy}<Loader2 size={11} class="animate-spin" />{:else}<Trash2 size={11} />{/if}
+              </button>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
+  </div>
+
 </div>

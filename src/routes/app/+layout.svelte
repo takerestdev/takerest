@@ -283,11 +283,14 @@
                 <ApiPanel />
               {:else if workspace.activeTool === 'git'}
                 <GitPanel />
-              {:else if workspace.activeTool === 'docker'}
-                <DockerPanel />
-              {:else}
+              {:else if workspace.activeTool !== 'docker'}
                 <StubPanel tool={workspace.activeTool} />
               {/if}
+              <!-- Docker panel: always mounted while sidebar is open so data loads in
+                   the background and appears instantly when the user switches to it. -->
+              <div class="h-full {workspace.activeTool === 'docker' ? '' : 'hidden'}">
+                <DockerPanel />
+              </div>
             </div>
           </div>
         </Resizable.Pane>

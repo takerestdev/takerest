@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use bollard::container::{
     ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions,
     RestartContainerOptions, StartContainerOptions, StopContainerOptions,
 };
 use bollard::image::{ListImagesOptions, RemoveImageOptions};
+use bollard::system::EventsOptions;
 use bollard::Docker;
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -25,6 +26,16 @@ pub struct DockerStreamState {
 impl DockerStreamState {
     pub fn new() -> Self {
         Self { streams: Mutex::new(HashMap::new()) }
+    }
+}
+
+pub struct DockerEventState {
+    pub flag: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+impl DockerEventState {
+    pub fn new() -> Self {
+        Self { flag: Mutex::new(None) }
     }
 }
 
@@ -66,24 +77,54 @@ pub struct DockerLogLine {
 }
 
 #[derive(Serialize, Clone)]
+pub struct ExecResult {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+#[derive(Serialize, Clone)]
 struct DockerComposeLinePayload {
     pub line: String,
     pub stream: String,
     pub done: bool,
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Shared Docker client ──────────────────────────────────────────────────────
+// One instance for the lifetime of the process. Clone is cheap (Arc internally)
+// and shares the underlying hyper connection pool, so connections are reused
+// across all commands instead of being re-established on every call.
+
+static DOCKER: OnceLock<Docker> = OnceLock::new();
 
 fn docker_client() -> Result<Docker, AppError> {
-    Docker::connect_with_local_defaults()
-        .map_err(|e| AppError::Other(format!("Docker not available: {e}")))
+    Ok(DOCKER
+        .get_or_init(|| {
+            Docker::connect_with_local_defaults()
+                .expect("bollard: failed to initialise Docker client configuration")
+        })
+        .clone())
 }
+
+/// Spawn a background task that pings Docker at app startup.
+/// This warms up the named-pipe / socket connection so the first user-visible
+/// API call hits an already-open connection rather than paying connection setup.
+pub fn prewarm_docker() {
+    if let Ok(docker) = docker_client() {
+        tauri::async_runtime::spawn(async move {
+            let _ = timeout(Duration::from_secs(3), docker.ping()).await;
+        });
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn parse_log_output(output: LogOutput) -> Option<DockerLogLine> {
     let (stream, bytes) = match output {
         LogOutput::StdOut { message } => ("stdout", message),
         LogOutput::StdErr { message } => ("stderr", message),
-        _ => return None,
+        // Console = TTY containers (no multiplexing header) — treat as stdout
+        LogOutput::Console { message } => ("stdout", message),
+        LogOutput::StdIn { .. } => return None,
     };
     let raw = String::from_utf8_lossy(&bytes);
     let raw = raw.trim_end_matches('\n');
@@ -332,7 +373,9 @@ pub async fn docker_start_log_stream(
             ..Default::default()
         };
 
+        eprintln!("[log_stream:{}] starting (tail={})", &cid[..12], tail);
         let mut stream = docker.logs(&cid, Some(opts));
+        let mut emitted = 0u64;
 
         while let Some(result) = stream.next().await {
             if !flag.load(Ordering::SeqCst) {
@@ -341,10 +384,12 @@ pub async fn docker_start_log_stream(
             match result {
                 Ok(output) => {
                     if let Some(line) = parse_log_output(output) {
+                        emitted += 1;
                         let _ = app_clone.emit(&format!("docker:log:{}", cid), line);
                     }
                 }
                 Err(e) => {
+                    eprintln!("[log_stream:{}] stream error: {e}", &cid[..12]);
                     let _ = app_clone.emit(
                         &format!("docker:log:{}", cid),
                         DockerLogLine {
@@ -358,6 +403,7 @@ pub async fn docker_start_log_stream(
             }
         }
 
+        eprintln!("[log_stream:{}] ended, emitted={emitted}", &cid[..12]);
         let _ = app_clone.emit(&format!("docker:log-end:{}", cid), ());
     });
 
@@ -575,6 +621,85 @@ pub fn docker_stop_engine() -> Result<(), AppError> {
             .map_err(|e| AppError::Other(format!("Failed to stop Docker: {e}")))?;
         return Ok(());
     }
+}
+
+/// Run a shell command inside a container and return stdout + stderr.
+/// Uses `sh -c` so the full shell syntax (pipes, quotes, etc.) works.
+#[tauri::command]
+pub async fn docker_exec_cmd(container_id: String, cmd: String) -> Result<ExecResult, AppError> {
+    let result = timeout(
+        Duration::from_secs(30),
+        tokio::process::Command::new("docker")
+            .args(["exec", &container_id, "sh", "-c", &cmd])
+            .output(),
+    )
+    .await
+    .map_err(|_| AppError::Other("exec timed out after 30s".into()))?
+    .map_err(|e| AppError::Other(format!("docker exec: {e}")))?;
+
+    Ok(ExecResult {
+        stdout: String::from_utf8_lossy(&result.stdout).trim_end().to_string(),
+        stderr: String::from_utf8_lossy(&result.stderr).trim_end().to_string(),
+    })
+}
+
+/// Stream Docker container events and emit `docker:event` to the frontend.
+/// Uses tokio::select so the task exits within ~500 ms after stop is requested.
+#[tauri::command]
+pub async fn docker_watch_events(
+    app: AppHandle,
+    state: State<'_, DockerEventState>,
+) -> Result<(), AppError> {
+    let new_flag = Arc::new(AtomicBool::new(true));
+    {
+        let mut guard = state.flag.lock().map_err(|_| AppError::Other("lock poisoned".into()))?;
+        if let Some(old) = guard.take() {
+            old.store(false, Ordering::SeqCst);
+        }
+        *guard = Some(Arc::clone(&new_flag));
+    }
+
+    let app_clone = app.clone();
+    let flag = new_flag;
+
+    tauri::async_runtime::spawn(async move {
+        let docker = match docker_client() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+
+        let opts: Option<EventsOptions<String>> = None;
+        let mut stream = docker.events(opts);
+
+        loop {
+            tokio::select! {
+                result = stream.next() => {
+                    match result {
+                        Some(Ok(_)) => {
+                            if !flag.load(Ordering::SeqCst) { break; }
+                            let _ = app_clone.emit("docker:event", ());
+                        }
+                        _ => break,
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                    if !flag.load(Ordering::SeqCst) { break; }
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn docker_stop_watch_events(state: State<'_, DockerEventState>) -> Result<(), AppError> {
+    if let Ok(mut guard) = state.flag.lock() {
+        if let Some(flag) = guard.take() {
+            flag.store(false, Ordering::SeqCst);
+        }
+    }
+    Ok(())
 }
 
 async fn run_compose(

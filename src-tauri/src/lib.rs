@@ -2,7 +2,7 @@ mod commands;
 mod error;
 mod utils;
 
-use commands::docker::DockerStreamState;
+use commands::docker::{DockerEventState, DockerStreamState};
 use commands::watcher::WatcherState;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(WatcherState(Mutex::new(None), Arc::new(AtomicU64::new(0))))
         .manage(DockerStreamState::new())
+        .manage(DockerEventState::new())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -95,8 +96,15 @@ pub fn run() {
             commands::docker::docker_ping,
             commands::docker::docker_start_engine,
             commands::docker::docker_stop_engine,
+            commands::docker::docker_watch_events,
+            commands::docker::docker_stop_watch_events,
+            commands::docker::docker_exec_cmd,
         ])
         .setup(|app| {
+            // Warm up the Docker connection in the background so the first
+            // user-visible Docker panel load hits an existing connection.
+            commands::docker::prewarm_docker();
+
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("takerest")
                 .inner_size(1200.0, 800.0)
