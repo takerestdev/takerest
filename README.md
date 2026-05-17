@@ -110,7 +110,7 @@ bun run tauri build
 
 Opening a project creates a `.anide/` folder at the repo root. All your requests, notes, and config live there as plain files — readable, diffable, and committed to Git with the rest of your code.
 
-```
+```text
 your-project/
 ├── .anide/
 │   ├── README.md          ← project notes, editable in-app

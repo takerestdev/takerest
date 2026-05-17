@@ -48,7 +48,8 @@
   function coerce(str) {
     if (str === 'true') return true;
     if (str === 'false') return false;
-    if (str === 'null' || str === '') return '';
+    if (str === 'null') return null;
+    if (str === '') return '';
     const n = Number(str);
     return (!isNaN(n) && str.trim() !== '') ? n : str;
   }
@@ -77,6 +78,7 @@
   // Rename a key in a plain object while preserving order
   function renameObjKey(obj, oldKey, newKey) {
     if (!newKey.trim() || oldKey === newKey) return obj;
+    if (Object.prototype.hasOwnProperty.call(obj, newKey)) return obj;
     const result = {};
     for (const [k, v] of Object.entries(obj)) result[k === oldKey ? newKey : k] = v;
     return result;
