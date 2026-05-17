@@ -37,7 +37,7 @@ export async function scanProject(projectPath) {
 
 
 /**
- * Save the README.md file in .anide/ folder
+ * Save README.md to the project root.
  * @param {string} projectPath - Absolute path to the project folder
  * @param {string} content - Markdown content to save
  * @returns {Promise<void>}

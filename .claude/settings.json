@@ -5,7 +5,9 @@
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(k,v\\) for k,v in {**d.get\\('dependencies',{}\\),**d.get\\('devDependencies',{}\\)}.items\\(\\)]\")",
       "Bash(npx shadcn-svelte@latest add context-menu)",
       "PowerShell(npx shadcn-svelte@latest add context-menu 2>&1)",
-      "Bash(node -e \"const m = require\\('./node_modules/@tauri-apps/plugin-opener/dist-cjs/index.cjs'\\); console.log\\(Object.keys\\(m\\)\\)\")"
+      "Bash(node -e \"const m = require\\('./node_modules/@tauri-apps/plugin-opener/dist-cjs/index.cjs'\\); console.log\\(Object.keys\\(m\\)\\)\")",
+      "Bash(xargs grep -l \"checkbox\")",
+      "Bash(grep -n -A 30 'props = $derived' node_modules/bits-ui/dist/bits/checkbox/checkbox.svelte.js)"
     ]
   }
 }

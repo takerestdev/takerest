@@ -97,5 +97,11 @@ pub fn list_doc_files(project_path: String) -> Result<Vec<String>, AppError> {
 #[tauri::command]
 pub fn delete_doc_file(project_path: String, rel_path: String) -> Result<(), AppError> {
     let path = resolve_in_project(&project_path, &rel_path)?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext != "md" && ext != "excalidraw" {
+        return Err(AppError::Other(
+            "Only .md and .excalidraw files can be deleted via this command".to_string(),
+        ));
+    }
     std::fs::remove_file(&path).map_err(AppError::Io)
 }

@@ -27,12 +27,12 @@
 	{#snippet children({ checked, indeterminate })}
 		<div
 			data-slot="checkbox-indicator"
-			class="[&>svg]:size-3.5 grid place-content-center text-current transition-none"
+			class="[&>svg]:size-3.5 grid place-content-center transition-none"
 		>
 			{#if checked}
-				<CheckIcon  />
+				<CheckIcon color="var(--primary-foreground)" />
 			{:else if indeterminate}
-				<MinusIcon  />
+				<MinusIcon color="var(--primary-foreground)" />
 			{/if}
 		</div>
 	{/snippet}

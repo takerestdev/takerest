@@ -30,7 +30,7 @@ pub struct ProjectInfo {
     /// Dominant file extension in the project, e.g. ".ts", ".py", ".rs"
     pub major_filetype: Option<FiletypeInfo>,
 
-    /// Project metadata from .takerest/README.md, None if not found or invalid
+    /// Project metadata from .anide/README.md, None if not found or invalid
     pub readme_metadata: Option<ReadmeMetadata>,
     
     /// Root README.md content from project root, None if not found
@@ -90,7 +90,7 @@ Clone the repo, open Anide, point it here. Everything is ready.
 
 // ── Commands ─────────────────────────────────────────────────────────────
 
-/// Ensures .takerest/ folder exists. Creates it if missing.
+/// Ensures .anide/ folder exists. Creates it if missing.
 /// Returns true if it already existed, false if it was just created.
 #[tauri::command]
 pub fn init_project(project_path: String) -> Result<bool, AppError> {
@@ -215,7 +215,7 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
     })
 }
 
-/// Save the README.md file in .takerest/ folder
+/// Save README.md to the project root.
 #[tauri::command]
 pub fn save_readme(project_path: String, content: String) -> Result<(), AppError> {
     

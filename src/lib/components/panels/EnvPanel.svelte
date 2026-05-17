@@ -39,9 +39,12 @@
         const files = await listEnvFiles(path);
         envFiles = files;
         const t = buildTree(files);
-        for (const node of t) {
-          if (node.type === 'dir') expanded.add(node.key);
-        }
+        const addDirs = (nodes) => {
+          for (const node of nodes) {
+            if (node.type === 'dir') { expanded.add(node.key); addDirs(node.children); }
+          }
+        };
+        addDirs(t);
         expanded = new Set(expanded);
       }
       catch (e) { console.error('Failed to list env files', e); }

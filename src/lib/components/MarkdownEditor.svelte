@@ -4,13 +4,15 @@
    * Notion-style WYSIWYG markdown editor built on TipTap.
    *
    * Props:
-   *   content     : string                         — initial markdown
-   *   onSave?     : (md: string) => Promise|void
-   *   onCancel?   : () => void
+   *   content        : string                         — initial markdown
+   *   onSave?        : (md: string) => Promise|void
+   *   onCancel?      : () => void
    *   onDirtyChange? : (dirty: boolean) => void
-   *   title?      : string
-   *   icon?       : Lucide component
-   *   readonly?   : boolean
+   *   title?         : string
+   *   icon?          : Lucide component
+   *   readonly?      : boolean
+   *   headerExtra?   : Snippet — rendered in the header bar after the filename
+   *   belowHeader?   : Snippet — rendered between the header bar and editor body
    */
   let {
     content: initialContent = '',
@@ -20,6 +22,9 @@
     title = '',
     icon: Icon = null,
     readonly = false,
+    extraDirty = false,
+    headerExtra = null,
+    belowHeader = null,
   } = $props();
 
   import { onMount, onDestroy } from 'svelte';
@@ -35,7 +40,7 @@
   import { BubbleMenu, FloatingMenu } from 'svelte-tiptap';
   import {
     Bold, Italic, Strikethrough, Code, Code2, Heading1, Heading2, Heading3,
-    List, ListOrdered, ListTodo, TextQuote, Link2, Table2,
+    List, ListOrdered, ListTodo, TextQuote, Link2, Table2, Trash2,
     Undo2, Save, X, Loader2, FileText, Check,
   } from '@lucide/svelte';
 
@@ -49,19 +54,21 @@
   let saving      = $state(false);
   let showLink    = $state(false);
   let linkValue   = $state('');
-  let originalMd  = '';  // set once in onMount from initialContent
+  let originalMd  = '';
 
   // Derived from editor transaction updates (onTransaction reassigns `editor`)
   let inCodeBlock  = $derived(editor?.isActive('codeBlock') ?? false);
+  let inTable      = $derived(editor?.isActive('table') ?? false);
   let codeBlockLang = $derived(inCodeBlock ? (editor?.getAttributes('codeBlock')?.language ?? '') : '');
 
-  // Strip &nbsp; /   that TipTap emits for empty paragraphs
+  // Strip &nbsp; / U+00A0 that TipTap emits for empty paragraphs
   function cleanMd(raw) {
     if (!raw) return '';
     return raw
       .replace(/&nbsp;/g, '')
       .replace(/ /g, '')
-      .replace(/[ \t]+$/gm, '');  // trim trailing whitespace per line
+      .replace(/[ \t]+$/gm, '')
+      .trimEnd();
   }
 
   onMount(() => {
@@ -112,7 +119,6 @@
         }
       },
       onTransaction({ editor: e }) {
-        // Swap reference so Svelte re-renders toolbar active states
         editor = undefined;
         editor = e;
       },
@@ -142,7 +148,7 @@
   });
 
   async function handleSave() {
-    if (!editor || !isDirty || saving) return;
+    if (!editor || (!isDirty && !extraDirty) || saving) return;
     saving = true;
     try {
       const md = cleanMd(editor.getMarkdown?.() ?? editor.getHTML());
@@ -192,13 +198,15 @@
 
   const isActive = (name, attrs) => editor?.isActive(name, attrs) ?? false;
 
-  // Prevent bubble menu clicks from stealing editor focus (except the link input)
   function bubbleMouseDown(e) {
     if (e.target !== linkInputEl) e.preventDefault();
   }
 
   const bubbleShouldShow = ({ editor: e, from, to }) =>
     !readonly && from !== to && !e.isActive('codeBlock');
+
+  const tableShouldShow = ({ editor: e }) =>
+    !readonly && e.isActive('table');
 
   const floatShouldShow = ({ editor: e, state }) => {
     if (!e.isEditable || e.isActive('codeBlock')) return false;
@@ -219,6 +227,12 @@
     {:else}<FileText size={14} class="text-muted-foreground shrink-0" />{/if}
     <span class="text-sm font-medium truncate flex-1 min-w-0">{title}</span>
 
+    <!-- Extra header content (e.g. frontmatter toggle) injected by parent -->
+    {#if headerExtra}
+      <span class="w-px h-4 bg-border shrink-0"></span>
+      {@render headerExtra()}
+    {/if}
+
     <!-- Language badge when cursor is inside a code block -->
     {#if inCodeBlock && !readonly}
       <span class="w-px h-4 bg-border shrink-0"></span>
@@ -234,8 +248,11 @@
       />
     {/if}
 
-    {#if isDirty && !readonly}
+    {#if (isDirty || extraDirty) && !readonly}
       <span class="text-[10px] text-muted-foreground/60 shrink-0">unsaved changes</span>
+    {/if}
+
+    {#if isDirty && !readonly}
       <button type="button" onclick={handleDiscard} disabled={saving}
         class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
         <Undo2 size={12} />Discard
@@ -249,7 +266,7 @@
       </button>
     {/if}
 
-    {#if isDirty && !readonly}
+    {#if (isDirty || extraDirty) && !readonly}
       <button type="button" onclick={handleSave} disabled={saving}
         class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
         {#if saving}<Loader2 size={12} class="animate-spin" />Saving…
@@ -258,10 +275,12 @@
     {/if}
   </div>
 
+  <!-- Below-header slot: e.g. frontmatter panel -->
+  {@render belowHeader?.()}
+
   <!-- Editor body -->
   <div class="flex-1 overflow-auto relative">
 
-    <!-- Bubble menu — only rendered once editor exists -->
     {#if editor}
       <!-- Floating menu on empty lines: block type shortcuts -->
       <FloatingMenu {editor} shouldShow={floatShouldShow} options={{ placement: 'left', offset: 20 }}>
@@ -286,6 +305,7 @@
         {/snippet}
       </FloatingMenu>
 
+      <!-- Text selection bubble menu -->
       <BubbleMenu {editor} shouldShow={bubbleShouldShow} options={{ placement: 'top-start', offset: 8 }}>
         {#snippet children()}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -294,7 +314,6 @@
             class="flex items-center rounded-lg border border-border bg-popover shadow-lg overflow-hidden z-50"
           >
             {#if showLink}
-              <!-- Link input row -->
               <div class="flex items-center gap-1 px-2 py-1">
                 <span class="text-[10px] text-muted-foreground font-medium shrink-0">URL</span>
                 <input
@@ -312,7 +331,6 @@
                 <button onclick={cancelLink} class="bbl" title="Cancel"><X size={12} /></button>
               </div>
             {:else}
-              <!-- Format buttons -->
               <div class="flex items-center gap-0 p-1">
                 <button onclick={() => editor?.chain().focus().toggleBold().run()} class="bbl {isActive('bold') ? 'on' : ''}" title="Bold"><Bold size={13} /></button>
                 <button onclick={() => editor?.chain().focus().toggleItalic().run()} class="bbl {isActive('italic') ? 'on' : ''}" title="Italic"><Italic size={13} /></button>
@@ -331,6 +349,56 @@
                 <button onclick={openLink} class="bbl {isActive('link') ? 'on' : ''}" title="Link"><Link2 size={13} /></button>
               </div>
             {/if}
+          </div>
+        {/snippet}
+      </BubbleMenu>
+
+      <!-- Table actions bubble — shows whenever cursor is inside a table -->
+      <BubbleMenu {editor} shouldShow={tableShouldShow} options={{ placement: 'top', offset: 8 }}>
+        {#snippet children()}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            onmousedown={(e) => e.preventDefault()}
+            class="flex items-center gap-0.5 rounded-lg border border-border bg-popover shadow-lg p-1 z-50"
+          >
+            <button
+              onclick={() => editor?.chain().focus().addColumnBefore().run()}
+              class="bbl" title="Add column before">
+              <span class="text-[10px] font-mono leading-none">+◀</span>
+            </button>
+            <button
+              onclick={() => editor?.chain().focus().addColumnAfter().run()}
+              class="bbl" title="Add column after">
+              <span class="text-[10px] font-mono leading-none">▶+</span>
+            </button>
+            <button
+              onclick={() => editor?.chain().focus().deleteColumn().run()}
+              class="bbl" title="Delete column">
+              <span class="text-[10px] font-mono leading-none">−col</span>
+            </button>
+            <span class="w-px h-4 bg-border mx-0.5 shrink-0"></span>
+            <button
+              onclick={() => editor?.chain().focus().addRowBefore().run()}
+              class="bbl" title="Add row above">
+              <span class="text-[10px] font-mono leading-none">+▲</span>
+            </button>
+            <button
+              onclick={() => editor?.chain().focus().addRowAfter().run()}
+              class="bbl" title="Add row below">
+              <span class="text-[10px] font-mono leading-none">▼+</span>
+            </button>
+            <button
+              onclick={() => editor?.chain().focus().deleteRow().run()}
+              class="bbl" title="Delete row">
+              <span class="text-[10px] font-mono leading-none">−row</span>
+            </button>
+            <span class="w-px h-4 bg-border mx-0.5 shrink-0"></span>
+            <button
+              onclick={() => editor?.chain().focus().deleteTable().run()}
+              class="bbl text-destructive hover:bg-destructive/10"
+              title="Delete table">
+              <Trash2 size={12} />
+            </button>
           </div>
         {/snippet}
       </BubbleMenu>
@@ -437,7 +505,6 @@
   :global(.md-editor .ProseMirror li p) { margin: 0; }
 
   /* ── Task list (checkbox) ─────────────────────────────────────────────────── */
-  /* TipTap puts data-type on the UL, NOT the li — selectors must use ul > li */
   :global(.md-editor .ProseMirror ul[data-type="taskList"]) {
     list-style: none; padding-left: 0.25rem;
   }
@@ -452,8 +519,6 @@
     flex-shrink: 0; cursor: pointer;
     margin-top: 0.3rem;
   }
-
-  /* Show the native input; override Tailwind forms' blue with primary */
   :global(.md-editor .ProseMirror ul[data-type="taskList"] > li > label input[type="checkbox"]) {
     position: static !important;
     opacity: 1 !important;
@@ -466,19 +531,13 @@
     color: var(--primary) !important;
     border-color: color-mix(in oklch, var(--primary) 55%, var(--border)) !important;
   }
-
-  /* Hide the decorative span — input is visible and handled by Tailwind forms */
   :global(.md-editor .ProseMirror ul[data-type="taskList"] > li > label span) {
     display: none !important;
   }
-
-  /* Checked — TipTap sets data-checked="true" on the li, not on the input */
   :global(.md-editor .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > label input[type="checkbox"]) {
     background-color: var(--primary) !important;
     border-color: var(--primary) !important;
   }
-
-  /* Content area */
   :global(.md-editor .ProseMirror ul[data-type="taskList"] > li > *:not(label)) {
     flex: 1; min-width: 0;
   }
@@ -498,7 +557,7 @@
   }
   :global(.md-editor .ProseMirror a:hover) { opacity: 0.8; }
 
-  /* Tables — border-separate + spacing:0 so border-radius works with borders */
+  /* Tables */
   :global(.md-editor .ProseMirror table) {
     width: 100%;
     border-collapse: separate;

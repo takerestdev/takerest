@@ -6,59 +6,44 @@
   import { workspace } from '$lib/stores/workspace.svelte.js';
   import { untrack } from 'svelte';
   import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
-  import { Input } from '$lib/components/ui/input/index.js';
-  import { Loader2, XCircle, ChevronDown, ChevronRight, Plus, X, Tags } from '@lucide/svelte';
+  import FrontmatterEditor from '$lib/components/FrontmatterEditor.svelte';
+  import { Loader2, XCircle, ChevronDown, ChevronRight, Tags } from '@lucide/svelte';
+  // ChevronDown/Right used by fmButton snippet
 
   let projectPath = $derived(data.folderPath);
   let relPath     = $derived(data.relPath);
 
-  let loading   = $state(true);
-  let loadError = $state('');
-  let body      = $state('');
-
-  /** @type {{ key: string, value: string }[]} */
-  let frontmatterFields = $state([]);
-  let originalFieldsJson = $state('[]');
-
-  let fmOpen = $state(false);
-  let bodyDirty = $state(false);
-
-  let fmDirty = $derived(
-    JSON.stringify(frontmatterFields.map(f => ({ key: f.key, value: f.value }))) !== originalFieldsJson
-  );
+  let loading      = $state(true);
+  let loadError    = $state('');
+  let body         = $state('');
+  let yamlText     = $state('');
+  let originalYaml = $state('');
+  let fmOpen       = $state(false);
+  let bodyDirty    = $state(false);
+  let fmDirty      = $derived(yamlText !== originalYaml);
 
   $effect(() => {
     const dirty = bodyDirty || fmDirty;
     untrack(() => workspace.setTabDirty(tabId, dirty));
   });
 
-  /** @param {string} raw @returns {{ fields: {key:string,value:string}[], body: string }} */
   function parseFrontmatter(raw) {
-    if (!raw.startsWith('---\n') && !raw.startsWith('---\r\n')) {
-      return { fields: [], body: raw };
-    }
-    const rest = raw.slice(4);
-    const closeIdx = rest.indexOf('\n---');
-    if (closeIdx === -1) return { fields: [], body: raw };
-    const yamlBlock = rest.slice(0, closeIdx);
-    let bodyPart = rest.slice(closeIdx + 4);
+    const norm = raw.replace(/\r\n/g, '\n');
+    if (!norm.startsWith('---\n')) return { yaml: '', body: norm };
+    const rest = norm.slice(4);
+    const closeMatch = rest.match(/\n---(\n|$)/);
+    if (!closeMatch) return { yaml: '', body: norm };
+    const closeIdx = closeMatch.index;
+    const yaml = rest.slice(0, closeIdx);
+    let bodyPart = rest.slice(closeIdx + closeMatch[0].length);
     if (bodyPart.startsWith('\n')) bodyPart = bodyPart.slice(1);
-    const fields = [];
-    for (const line of yamlBlock.split('\n')) {
-      const ci = line.indexOf(':');
-      if (ci === -1) continue;
-      const k = line.slice(0, ci).trim();
-      const v = line.slice(ci + 1).trim();
-      if (k) fields.push({ key: k, value: v });
-    }
-    return { fields, body: bodyPart };
+    return { yaml, body: bodyPart };
   }
 
-  /** @param {{ key: string, value: string }[]} fields @returns {string} */
-  function serializeFrontmatter(fields) {
-    const valid = fields.filter(f => f.key.trim());
-    if (valid.length === 0) return '';
-    return `---\n${valid.map(f => `${f.key}: ${f.value}`).join('\n')}\n---\n\n`;
+  function serializeFrontmatter(yaml) {
+    const trimmed = yaml.trim();
+    if (!trimmed) return '';
+    return `---\n${trimmed}\n---\n\n`;
   }
 
   $effect(() => {
@@ -70,11 +55,11 @@
     loadError = '';
     try {
       const raw = await readProjectFile(projectPath, relPath);
-      const parsed = parseFrontmatter(raw);
-      frontmatterFields = parsed.fields;
-      originalFieldsJson = JSON.stringify(parsed.fields.map(f => ({ key: f.key, value: f.value })));
-      fmOpen = parsed.fields.length > 0;
-      body = parsed.body;
+      const { yaml, body: b } = parseFrontmatter(raw);
+      yamlText = yaml;
+      originalYaml = yaml;
+      fmOpen = yaml.trim().length > 0;
+      body = b;
     } catch (e) {
       loadError = e?.message ?? String(e);
     } finally {
@@ -83,24 +68,46 @@
   }
 
   async function handleSave(bodyMd) {
-    const validFields = frontmatterFields.filter(f => f.key.trim());
-    const fm = serializeFrontmatter(validFields);
+    const fm = serializeFrontmatter(yamlText);
     await writeProjectFile(projectPath, relPath, fm + bodyMd);
-    originalFieldsJson = JSON.stringify(validFields.map(f => ({ key: f.key, value: f.value })));
-    if (frontmatterFields.some(f => !f.key.trim())) {
-      frontmatterFields = validFields;
-    }
+    originalYaml = yamlText;
   }
 
-  function addField() {
-    frontmatterFields = [...frontmatterFields, { key: '', value: '' }];
-  }
-
-  /** @param {number} idx */
-  function removeField(idx) {
-    frontmatterFields = frontmatterFields.filter((_, i) => i !== idx);
-  }
 </script>
+
+{#snippet fmButton()}
+  <button
+    type="button"
+    onclick={(e) => { e.stopPropagation(); fmOpen = !fmOpen; }}
+    class="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors shrink-0"
+    title="{fmOpen ? 'Hide frontmatter' : 'Show frontmatter'}"
+  >
+    <Tags size={11} class="shrink-0" />
+    <span>FM</span>
+    {#if fmDirty}<span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 ml-0.5"></span>{/if}
+    {#if fmOpen}<ChevronDown size={9} class="shrink-0" />{:else}<ChevronRight size={9} class="shrink-0" />{/if}
+  </button>
+{/snippet}
+
+{#snippet fmPanel()}
+  {#if fmOpen}
+    <div class="border-b shrink-0 bg-muted/20 max-h-[45vh] overflow-y-auto">
+      <div class="px-4 py-3">
+        <FrontmatterEditor
+          value={yamlText}
+          onchange={(yaml) => { yamlText = yaml; }}
+        />
+        {#if fmDirty}
+          <button
+            type="button"
+            onclick={() => { yamlText = originalYaml; }}
+            class="mt-2 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+          >↩ Discard FM changes</button>
+        {/if}
+      </div>
+    </div>
+  {/if}
+{/snippet}
 
 {#if loading}
   <div class="h-full flex items-center justify-center gap-2 text-muted-foreground">
@@ -114,78 +121,14 @@
   </div>
 {:else}
   <div class="h-full flex flex-col overflow-hidden">
-
-    <!-- Frontmatter panel -->
-    <div class="border-b shrink-0 bg-muted/20">
-      <button
-        type="button"
-        onclick={() => (fmOpen = !fmOpen)}
-        class="w-full flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-      >
-        {#if fmOpen}
-          <ChevronDown size={12} class="shrink-0" />
-        {:else}
-          <ChevronRight size={12} class="shrink-0" />
-        {/if}
-        <Tags size={12} class="shrink-0" />
-        <span class="font-medium">Frontmatter</span>
-        {#if fmDirty}
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
-        {/if}
-        {#if !fmOpen}
-          {#if frontmatterFields.length > 0}
-            <span class="ml-auto text-[10px] text-muted-foreground/70">{frontmatterFields.length} {frontmatterFields.length === 1 ? 'field' : 'fields'}</span>
-          {:else}
-            <span class="ml-auto text-[10px] text-muted-foreground/50">no fields</span>
-          {/if}
-        {/if}
-      </button>
-
-      {#if fmOpen}
-        <div class="px-4 pb-3 pt-1">
-          {#if frontmatterFields.length > 0}
-            <div class="grid grid-cols-[1fr_2fr_auto] gap-x-2 gap-y-1.5 mb-2 items-center text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider px-1">
-              <div>Key</div>
-              <div>Value</div>
-              <div class="w-6"></div>
-            </div>
-            {#each frontmatterFields as field, i (i)}
-              <div class="grid grid-cols-[1fr_2fr_auto] gap-2 items-center mb-1.5">
-                <Input bind:value={field.key} placeholder="key" class="h-7 text-xs font-mono" />
-                <Input bind:value={field.value} placeholder="value" class="h-7 text-xs font-mono" />
-                <button
-                  type="button"
-                  onclick={() => removeField(i)}
-                  aria-label="Remove field"
-                  class="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            {/each}
-          {:else}
-            <p class="text-xs text-muted-foreground/50 mb-2 px-1">No frontmatter fields.</p>
-          {/if}
-          <button
-            type="button"
-            onclick={addField}
-            class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1"
-          >
-            <Plus size={12} />Add field
-          </button>
-        </div>
-      {/if}
-    </div>
-
-    <!-- Markdown editor -->
-    <div class="flex-1 overflow-hidden min-h-0">
-      <MarkdownEditor
-        content={body}
-        title={relPath.split('/').pop()}
-        onSave={handleSave}
-        onDirtyChange={(d) => { bodyDirty = d; }}
-      />
-    </div>
-
+    <MarkdownEditor
+      content={body}
+      title={relPath.split('/').pop()}
+      onSave={handleSave}
+      onDirtyChange={(d) => { bodyDirty = d; }}
+      extraDirty={fmDirty}
+      headerExtra={fmButton}
+      belowHeader={fmPanel}
+    />
   </div>
 {/if}

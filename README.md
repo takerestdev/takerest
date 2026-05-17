@@ -1,8 +1,8 @@
-# takerest.dev
+# anide.app
 
 One app. Every tool a developer needs daily.
 
-Stop juggling Postman, DBeaver, Redis Insight, MinIO Browser, GitHub Desktop, and Docker Desktop. TakeRest puts all of them in a single native desktop app — built on Tauri/Rust, not Electron. Everything is stored in a `.takerest/` folder at your repo root, versioned alongside your code. No accounts. No cloud sync. Credentials stay on your machine.
+Stop juggling Postman, DBeaver, Redis Insight, MinIO Browser, GitHub Desktop, and Docker Desktop. Anide puts all of them in a single native desktop app — built on Tauri/Rust, not Electron. Everything is stored in a `.anide/` folder at your repo root, versioned alongside your code. No accounts. No cloud sync. Credentials stay on your machine.
 
 ---
 
@@ -16,19 +16,10 @@ Stop juggling Postman, DBeaver, Redis Insight, MinIO Browser, GitHub Desktop, an
 
 ---
 
-## Current state
-
-| | |
-| --- | --- |
-| IDE shell — VS Code-style tabs, resizable sidebar, activity bar | ✅ |
-| `.env` file manager — CRUD, key/value editor, .gitignore toggle | ✅ |
-| README viewer & editor — preview, raw, CodeMirror edit | ✅ |
-
----
-
 ## Roadmap
 
 ### REST Client
+
 Replaces: Postman, Insomnia, Bruno
 
 - [ ] REST, GraphQL, gRPC, WebSocket, SSE requests
@@ -38,6 +29,7 @@ Replaces: Postman, Insomnia, Bruno
 - [ ] Import from Postman JSON, OpenAPI, curl
 
 ### Database
+
 Replaces: DBeaver, TablePlus, MongoDB Compass
 
 - [ ] Connect to PostgreSQL, MySQL/MariaDB, SQLite, MongoDB
@@ -47,6 +39,7 @@ Replaces: DBeaver, TablePlus, MongoDB Compass
 - [ ] Track and compare migrations across environments
 
 ### KV / Cache
+
 Replaces: Redis Insight, Another Redis Desktop Manager
 
 - [ ] Connect to Redis, Valkey, KeyDB, Dragonfly
@@ -56,6 +49,7 @@ Replaces: Redis Insight, Another Redis Desktop Manager
 - [ ] Flush keys during dev without leaving the app
 
 ### Object Storage
+
 Replaces: MinIO Browser, Cyberduck, AWS S3 Console
 
 - [ ] Connect to AWS S3, Cloudflare R2, MinIO, Backblaze B2, DigitalOcean Spaces
@@ -65,24 +59,26 @@ Replaces: MinIO Browser, Cyberduck, AWS S3 Console
 - [ ] Manage bucket policies
 
 ### Git
+
 Replaces: GitHub Desktop, GitKraken, Fork
 
-- [ ] Stage files and commit
-- [ ] View diffs before committing
-- [ ] Create, switch, and manage branches
-- [ ] Push, pull, fetch
-- [ ] View commit history
+- [x] Stage files and commit
+- [x] View diffs before committing
+- [x] Create, switch, and manage branches
+- [x] Push, pull, fetch
+- [x] View commit history
 - [ ] Resolve merge conflicts
 
 ### Docker
+
 Replaces: Docker Desktop, Lazydocker
 
-- [ ] Start, stop, restart containers
-- [ ] Stream container logs live
-- [ ] `docker-compose up/down`
+- [x] Start, stop, restart containers
+- [x] Stream container logs live
+- [x] `docker-compose up/down`
 - [ ] Browse images and volumes
 - [ ] Check port mappings
-- [ ] Exec into a running container
+- [x] Exec into a running container
 
 ---
 
@@ -112,11 +108,11 @@ bun run tauri build
 
 ## How it works
 
-Opening a project creates a `.takerest/` folder at the repo root. All your requests, notes, and config live there as plain files — readable, diffable, and committed to Git with the rest of your code.
+Opening a project creates a `.anide/` folder at the repo root. All your requests, notes, and config live there as plain files — readable, diffable, and committed to Git with the rest of your code.
 
 ```
 your-project/
-├── .takerest/
+├── .anide/
 │   ├── README.md          ← project notes, editable in-app
 │   └── api/               ← saved requests (coming soon)
 ├── .env
@@ -128,4 +124,4 @@ Pull requests get richer. Onboarding gets faster. Your API keys never leave your
 
 ---
 
-> [takerest.dev](https://takerest.dev) · Built with Svelte + Tauri
+> [anide.app](https://anide.app) · Built with Svelte + Tauri
