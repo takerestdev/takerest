@@ -13,17 +13,22 @@
   import {
     Minus, Square, X,
     Globe, Database, KeySquare, Box, GitBranch, Container, Braces,
-    FileText, FileKey, PanelLeftClose,
+    FileText, FileKey, PanelLeftClose, BookOpen, FolderOpen, Gamepad2,
   } from '@lucide/svelte';
 
   import Logo from '$lib/components/logo.svelte';
   import Themetoggle from '$lib/components/themetoggle.svelte';
   import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 
+  import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+  import { toast } from 'svelte-sonner';
+
   import EnvPanel from '$lib/components/panels/EnvPanel.svelte';
   import ApiPanel from '$lib/components/panels/ApiPanel.svelte';
   import GitPanel from '$lib/components/panels/GitPanel.svelte';
   import DockerPanel from '$lib/components/panels/DockerPanel.svelte';
+  import DocsPanel from '$lib/components/panels/DocsPanel.svelte';
   import StubPanel from '$lib/components/panels/StubPanel.svelte';
   import ReadmeTab from '$lib/components/workspace/ReadmeTab.svelte';
   import EnvTab from '$lib/components/workspace/EnvTab.svelte';
@@ -32,6 +37,25 @@
   import CommitTab from '$lib/components/workspace/CommitTab.svelte';
   import DockerLogsTab from '$lib/components/workspace/DockerLogsTab.svelte';
   import FileTab from '$lib/components/workspace/FileTab.svelte';
+  import DocTab from '$lib/components/workspace/DocTab.svelte';
+  import TicTacToe from '$lib/components/TicTacToe.svelte';
+
+  let gameOpen  = $state(false);
+  let gameWidth = $state(320);
+
+  function startGameResize(e) {
+    const startX = e.clientX;
+    const startW = gameWidth;
+    const onMove = (mv) => {
+      gameWidth = Math.max(240, Math.min(600, startW - (mv.clientX - startX)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
 
   let isWindows = $state(false);
   let appWindow;
@@ -108,17 +132,22 @@
     };
   });
 
-  // Auto-open README tab on first load
-  $effect(() => {
-    if (folderPath && workspace.tabs.length === 0) {
-      workspace.openTab({
-        id: 'readme',
-        type: 'readme',
-        title: 'README.md',
-        data: { folderPath },
+  async function openFolder() {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false, title: 'Choose a project folder' });
+      if (!selected) return;
+      const label = `folder-${Date.now()}`;
+      const encoded = encodeURIComponent(selected);
+      const win = new WebviewWindow(label, {
+        url: `app?path=${encoded}`,
+        title: selected.split(/[\\/]/).filter(Boolean).pop() ?? 'Project',
+        width: 1200, height: 800, transparent: true, decorations: false, resizable: true, focus: true,
       });
+      win.once('tauri://error', () => toast.error('Failed to open folder'));
+    } catch {
+      toast.error('Failed to open folder');
     }
-  });
+  }
 
   onMount(async () => {
     appWindow = getCurrentWindow();
@@ -126,6 +155,7 @@
   });
 
   const toolItems = [
+    { id: 'docs',   icon: BookOpen,   label: 'Docs' },
     { id: 'api',    icon: Globe,      label: 'API' },
     { id: 'db',     icon: Database,   label: 'Database' },
     { id: 'kv',     icon: Braces,     label: 'Cache' },
@@ -136,13 +166,14 @@
   ];
 
   const panelLabels = {
-    api: 'API Requests', db: 'Databases', kv: 'Cache',
+    docs: 'Docs', api: 'API Requests', db: 'Databases', kv: 'Cache',
     s3: 'Storage', git: 'Git', docker: 'Docker', env: 'Env Files',
   };
 
   import { GitBranch as GitBranchIcon, GitCommit, Terminal as TerminalIcon, FileCode } from '@lucide/svelte';
   const tabTypeIcons = {
     readme: FileText,
+    doc: BookOpen,
     'env-file': FileKey,
     'git-diff': GitBranchIcon,
     'git-commit': GitCommit,
@@ -176,6 +207,15 @@
       {/if}
     </div>
     <div data-tauri-drag-region class="flex items-center justify-end">
+      <!-- Game button — before window controls on Windows/Linux; only button on Mac -->
+      <button
+        type="button"
+        aria-label="Toggle game"
+        title="Tic Tac Toe"
+        onclick={() => (gameOpen = !gameOpen)}
+        class="w-11 h-9 flex items-center justify-center transition-colors
+          {gameOpen ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+      ><Gamepad2 size={15} /></button>
       {#if isWindows}
         <button
           type="button"
@@ -206,30 +246,23 @@
     <aside class="w-12 shrink-0 border-r flex flex-col items-center bg-background/50">
       <Tooltip.Provider>
 
-        <!-- Logo / README home -->
+        <!-- Logo / home -->
         <Tooltip.Root>
           <Tooltip.Trigger>
             {#snippet child({ props })}
               <button
                 {...props}
                 type="button"
-                onclick={() => {
-                  workspace.openTab({ id: 'readme', type: 'readme', title: 'README.md', data: { folderPath } });
-                  workspace.activeTool = null;
-                  workspace.sidebarOpen = false;
-                }}
-                class="w-full flex justify-center py-3 mb-1 transition-colors
-                  {workspace.activeTabId === 'readme' && !workspace.sidebarOpen
-                    ? 'text-foreground'
-                    : 'text-muted-foreground hover:text-foreground/80'}"
+                onclick={() => { workspace.activeTabId = null; workspace.activeTool = null; workspace.sidebarOpen = false; }}
+                class="w-full flex justify-center py-3 mb-1 transition-colors text-muted-foreground hover:text-foreground/80"
               >
-                <div class="size-7 flex items-center justify-center">
-                  <Logo active={workspace.activeTabId === 'readme' && !workspace.sidebarOpen} />
+                <div class="size-9 flex items-center justify-center">
+                  <Logo class="size-9" />
                 </div>
               </button>
             {/snippet}
           </Tooltip.Trigger>
-          <Tooltip.Content side="right">README</Tooltip.Content>
+          <Tooltip.Content side="right">Home</Tooltip.Content>
         </Tooltip.Root>
 
         <!-- Tool icons -->
@@ -297,7 +330,9 @@
             </button>
           </div>
           <div class="flex-1 overflow-hidden">
-            {#if workspace.activeTool === 'env'}
+            {#if workspace.activeTool === 'docs'}
+              <DocsPanel />
+            {:else if workspace.activeTool === 'env'}
               <EnvPanel />
             {:else if workspace.activeTool === 'api'}
               <ApiPanel />
@@ -324,6 +359,21 @@
       <div class="flex-1 min-w-0 overflow-hidden flex flex-col">
         {@render tabArea()}
       </div>
+
+      <!-- Resizable game panel -->
+      {#if gameOpen}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="w-1 shrink-0 bg-border/40 hover:bg-primary/60 cursor-col-resize transition-colors"
+          onmousedown={startGameResize}
+        ></div>
+        <div
+          class="shrink-0 border-l overflow-auto flex items-center justify-center p-4"
+          style:width="{gameWidth}px"
+        >
+          <TicTacToe />
+        </div>
+      {/if}
 
     </div>
 
@@ -381,7 +431,9 @@
     <div class="flex-1 overflow-hidden relative">
       {#each workspace.tabs as tab (tab.id)}
         <div class="absolute inset-0 overflow-hidden {workspace.activeTabId === tab.id ? 'block' : 'hidden'}">
-          {#if tab.type === 'readme'}
+          {#if tab.type === 'doc'}
+            <DocTab data={tab.data} tabId={tab.id} />
+          {:else if tab.type === 'readme'}
             <ReadmeTab data={tab.data} tabId={tab.id} />
           {:else if tab.type === 'env-file'}
             <EnvTab data={tab.data} tabId={tab.id} />
@@ -401,10 +453,20 @@
         </div>
       {/each}
 
-      {#if workspace.tabs.length === 0}
-        <div class="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
-          <Logo active={false} />
-          <p class="text-sm">Open a file from the sidebar</p>
+      {#if !workspace.activeTabId}
+        <div class="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
+          <Logo class="size-48" />
+          <div class="flex flex-col items-center gap-2 text-center my-4">
+            <p class="text-xs text-muted-foreground mb-2">welcome to</p>
+            <p class="text-5xl font-bold font-serif lowercase tracking-tight text-foreground">anide.app</p>
+          </div>
+          <button
+            type="button"
+            onclick={openFolder}
+            class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border hover:bg-muted transition-colors"
+          >
+            <FolderOpen size={13} />Open New Folder
+          </button>
         </div>
       {/if}
     </div>

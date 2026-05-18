@@ -65,6 +65,9 @@
         focus: true,
       });
 
+      win.once("tauri://created", () => {
+        getCurrentWindow().close();
+      });
       win.once("tauri://error", (e) => {
         console.error("Window creation error:", e);
         toast.error("Failed to open folder", {
@@ -219,7 +222,7 @@
   }
 
   async function learnMore() {
-    await openUrl("https://takerest.dev");
+    await openUrl("https://anide.app");
   }
 
   // ── Status label ────────────────────────────────────────
@@ -249,7 +252,7 @@
       class="flex items-center px-4 py-2.5 justify-center gap-2.5"
     >
       <Logo />
-      <span class="font-semibold text-sm tracking-tight">takerest</span>
+      <span class="font-semibold text-sm tracking-tight">anide</span>
     </div>
 
     <!-- Right: Windows controls -->

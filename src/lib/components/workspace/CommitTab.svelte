@@ -2,6 +2,7 @@
   // @ts-nocheck
   let { data } = $props();
 
+  import { tick } from 'svelte';
   import { gitCommitFiles, gitDiffCommitFile, gitReadBlobAtCommit } from '$lib/commands/git.js';
   import { GitCommit, User, Clock, Hash, Loader2, AlertTriangle } from '@lucide/svelte';
 
@@ -25,6 +26,7 @@
   let sidebarEl    = $state(null);
   let scrollTop    = $state(0);
   let clientHeight = $state(500);
+  let clientWidth  = $state(800);
 
   // ── Fetch queue — plain JS, zero reactivity ────────────────────────────────
   let _gen       = 0;
@@ -51,6 +53,7 @@
           if (gen !== _gen) return;
           fileDiffs[file.path] = { error: '', result };
           if (result.isImage) fetchImageBlob(file, gen);
+          tick().then(applyPendingScroll); // correct scroll if heights changed
         })
         .catch(e => {
           if (gen !== _gen) return;
@@ -244,7 +247,10 @@
 
   // ── Scroll handler + active file tracking ──────────────────────────────────
   let _rafId = null;
-  $effect(() => () => { if (_rafId) cancelAnimationFrame(_rafId); });
+  $effect(() => () => {
+    if (_rafId) cancelAnimationFrame(_rafId);
+    if (_pendingScrollTimer) { clearTimeout(_pendingScrollTimer); _pendingScrollTimer = null; }
+  });
 
   function onScroll(e) {
     const st = e.currentTarget.scrollTop;
@@ -272,9 +278,28 @@
     if (btn) btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 
-  function scrollToFile(fi) {
-    const ri = fileHeaderPos[fi];
-    if (ri >= 0 && scrollEl) scrollEl.scrollTo({ top: positions[ri], behavior: 'smooth' });
+  let _pendingScrollFi = -1;
+  let _pendingScrollTimer = null;
+
+  async function scrollToFile(fi) {
+    // Cancel previous pending navigation
+    if (_pendingScrollTimer) { clearTimeout(_pendingScrollTimer); _pendingScrollTimer = null; }
+    _pendingScrollFi = fi;
+    // Enqueue diffs for all files above the target so heights stabilise quickly
+    for (let i = 0; i <= Math.min(fi, files.length - 1); i++) {
+      const f = files[i];
+      if (f && !_requested.has(f.path)) enqueueFile(f);
+    }
+    await tick();
+    applyPendingScroll();
+    // After 1.5 s positions are stable — stop re-scrolling
+    _pendingScrollTimer = setTimeout(() => { _pendingScrollFi = -1; _pendingScrollTimer = null; }, 1500);
+  }
+
+  function applyPendingScroll() {
+    if (_pendingScrollFi < 0 || !scrollEl) return;
+    const ri = fileHeaderPos[_pendingScrollFi];
+    if (ri >= 0) scrollEl.scrollTo({ top: positions[ri], behavior: 'instant' });
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -289,6 +314,7 @@
   const PREFIX     = { added: '+', removed: '-', context: ' ' };
 
   function fileKind(file) { return file.indexStatus?.type ?? 'modified'; }
+  function blobUrl(b) { return `data:${b.mime};base64,${b.data}`; }
 </script>
 
 <div class="h-full flex flex-col overflow-hidden font-sans">
@@ -365,6 +391,7 @@
       <div
         bind:this={scrollEl}
         bind:clientHeight
+        bind:clientWidth
         class="flex-1 min-w-0 overflow-auto font-mono text-[13px]"
         onscroll={onScroll}
       >
@@ -400,55 +427,24 @@
               {:else if row.type === 'image'}
                 {@const blob = imageBlobs[row.file.path]}
                 {@const kind = fileKind(row.file)}
-                <div class="flex flex-1 overflow-hidden font-sans">
+                <!-- Sticky wrapper pinned to the scroll viewport: the row spans the
+                     full (1500px+) inner width, so the image must be confined to the
+                     visible width or object-fit:contain centers it off-screen. -->
+                <div style="position:sticky; left:0; flex:none; width:{clientWidth}px; height:100%; display:flex; align-items:stretch;">
                   {#if !blob}
-                    <div class="flex w-full items-center justify-center gap-1.5 text-muted-foreground/40 text-xs">
+                    <div class="flex flex-1 items-center justify-center gap-1.5 text-muted-foreground/40 font-sans text-xs">
                       <Loader2 size={11} class="animate-spin" />Loading image…
                     </div>
                   {:else if blob.error}
-                    <div class="flex w-full items-center justify-center gap-2 text-destructive/70 text-xs">
+                    <div class="flex flex-1 items-center justify-center gap-2 text-destructive/70 font-sans text-xs">
                       <AlertTriangle size={12} />{blob.error}
                     </div>
-                  {:else if kind === 'added'}
-                    <div class="flex flex-col items-center justify-center gap-2 w-full py-3">
-                      <p class="text-[11px] text-green-600 dark:text-green-400 font-medium">Added</p>
-                      {#if blob.after}
-                        <img src="data:{blob.after.mime};base64,{blob.after.data}" alt="Added" class="max-h-65 object-contain rounded border shadow-sm" />
-                      {:else}
-                        <span class="text-xs text-muted-foreground">Not available</span>
-                      {/if}
-                    </div>
-                  {:else if kind === 'deleted'}
-                    <div class="flex flex-col items-center justify-center gap-2 w-full py-3">
-                      <p class="text-[11px] text-red-500 font-medium">Deleted</p>
-                      {#if blob.before}
-                        <div class="relative inline-block">
-                          <img src="data:{blob.before.mime};base64,{blob.before.data}" alt="Deleted" class="max-h-65 object-contain rounded border shadow-sm opacity-60" />
-                          <div class="absolute inset-0 bg-red-500/10 rounded border border-red-500/30"></div>
-                        </div>
-                      {:else}
-                        <span class="text-xs text-muted-foreground">Not available</span>
-                      {/if}
-                    </div>
+                  {:else if (kind === 'added' || kind === 'modified' || kind === 'renamed') && blob.after}
+                    <img src={blobUrl(blob.after)} alt="" style="flex:1; min-width:0; height:100%; object-fit:contain; padding:16px; box-sizing:border-box;" />
+                  {:else if blob.before}
+                    <img src={blobUrl(blob.before)} alt="" style="flex:1; min-width:0; height:100%; object-fit:contain; padding:16px; box-sizing:border-box;" />
                   {:else}
-                    <div class="grid grid-cols-2 gap-4 w-full p-4 max-w-4xl mx-auto">
-                      <div class="flex flex-col gap-1.5">
-                        <p class="text-[11px] text-muted-foreground text-center font-medium">Before</p>
-                        {#if blob.before}
-                          <img src="data:{blob.before.mime};base64,{blob.before.data}" alt="Before" class="w-full max-h-65 object-contain rounded border shadow-sm" />
-                        {:else}
-                          <div class="flex items-center justify-center h-20 border rounded text-muted-foreground text-xs">Not available</div>
-                        {/if}
-                      </div>
-                      <div class="flex flex-col gap-1.5">
-                        <p class="text-[11px] text-muted-foreground text-center font-medium">After</p>
-                        {#if blob.after}
-                          <img src="data:{blob.after.mime};base64,{blob.after.data}" alt="After" class="w-full max-h-65 object-contain rounded border shadow-sm" />
-                        {:else}
-                          <div class="flex items-center justify-center h-20 border rounded text-muted-foreground text-xs">Not available</div>
-                        {/if}
-                      </div>
-                    </div>
+                    <div class="flex flex-1 items-center justify-center font-sans text-xs text-muted-foreground">Not available</div>
                   {/if}
                 </div>
 

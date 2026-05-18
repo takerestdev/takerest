@@ -279,7 +279,7 @@ pub fn create_collection(project_path: String, collection_path: String) -> Resul
             | std::path::Component::RootDir
             | std::path::Component::Prefix(_) => {
                 return Err(AppError::InvalidPath(
-                    "Collection path must be within .takerest/requests/".to_string(),
+                    "Collection path must be within .anide/requests/".to_string(),
                 ));
             }
             _ => {}
@@ -300,7 +300,7 @@ pub fn create_collection(project_path: String, collection_path: String) -> Resul
     if !canonical_target.starts_with(&canonical_requests) {
         let _ = fs::remove_dir_all(&full_path);
         return Err(AppError::InvalidPath(
-            "Collection path must be within .takerest/requests/".to_string(),
+            "Collection path must be within .anide/requests/".to_string(),
         ));
     }
 
@@ -312,7 +312,7 @@ pub fn create_collection(project_path: String, collection_path: String) -> Resul
 /// Get the path to .takerest/requests/ directory.
 fn requests_dir_path(project_path: &str) -> PathBuf {
     Path::new(project_path)
-        .join(".takerest")
+        .join(".anide")
         .join("requests")
 }
 

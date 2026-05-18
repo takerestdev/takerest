@@ -81,6 +81,8 @@ pub fn run() {
             // file commands
             commands::files::read_project_file,
             commands::files::write_project_file,
+            commands::files::list_doc_files,
+            commands::files::delete_doc_file,
             // docker commands
             commands::docker::docker_list_containers,
             commands::docker::docker_list_images,
@@ -107,7 +109,7 @@ pub fn run() {
             commands::docker::prewarm_docker();
 
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("takerest")
+                .title("Anide")
                 .inner_size(1200.0, 800.0)
                 .transparent(true);
 

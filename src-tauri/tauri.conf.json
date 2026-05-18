@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "takerest",
+  "productName": "Anide",
   "version": "0.1.0",
-  "identifier": "dev.takerest.app",
+  "identifier": "app.anide",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",

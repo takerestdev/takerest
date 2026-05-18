@@ -13,6 +13,18 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
 
+/// Hide the console window that Windows creates for every subprocess spawn.
+macro_rules! no_window {
+    ($cmd:expr) => {
+        #[cfg(target_os = "windows")]
+        {
+            #[allow(unused_imports)]
+            use std::os::windows::process::CommandExt as _;
+            $cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+    };
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Clone, Debug)]
@@ -269,10 +281,10 @@ fn parse_hunk_range(s: &str) -> (u32, u32) {
 }
 
 fn run_git(project_path: &str, args: &[&str]) -> Result<(), AppError> {
-    let out = Command::new("git")
-        .arg("-C").arg(project_path)
-        .args(args)
-        .output()
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(project_path).args(args);
+    no_window!(cmd);
+    let out = cmd.output()
         .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
@@ -289,11 +301,10 @@ fn run_git(project_path: &str, args: &[&str]) -> Result<(), AppError> {
 
 #[tauri::command]
 pub fn git_status(project_path: String) -> Result<StatusResult, AppError> {
-    let output = Command::new("git")
-        .arg("--no-optional-locks")
-        .arg("-C").arg(&project_path)
-        .args(["status", "--porcelain=v1", "-u"])
-        .output()
+    let mut cmd = Command::new("git");
+    cmd.arg("--no-optional-locks").arg("-C").arg(&project_path).args(["status", "--porcelain=v1", "-u"]);
+    no_window!(cmd);
+    let output = cmd.output()
         .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
 
     if !output.status.success() {
@@ -380,35 +391,26 @@ pub fn git_diff_file(
     max_lines: Option<usize>,
 ) -> Result<DiffResult, AppError> {
     let max = max_lines.unwrap_or(10_000);
-    let repo = open_repo(&project_path)?;
-    let workdir = repo.work_dir().ok_or_else(|| AppError::Git("bare repository".into()))?.to_path_buf();
-    let index = repo.open_index().map_err(|e| AppError::Git(e.to_string()))?;
+
+    // Use git CLI to read blob content — avoids gix open_index() which fails
+    // on Windows for repos with large or locked indexes.
+    let git_show = |spec: &str| -> Vec<u8> {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(&project_path).args(["show", spec]);
+        no_window!(cmd);
+        cmd.output().map(|o| if o.status.success() { o.stdout } else { vec![] }).unwrap_or_default()
+    };
 
     let (old_bytes, new_bytes): (Vec<u8>, Vec<u8>) = if staged {
-        let old = repo.head_commit().ok()
-            .and_then(|c| c.tree().ok())
-            .map(|tree| {
-                let mut m = BTreeMap::new();
-                collect_tree_entries(&repo, &tree, "", &mut m).ok();
-                m.get(&rel_path)
-                    .and_then(|&oid| repo.find_object(oid).ok())
-                    .map(|o| o.data.to_vec())
-            })
-            .flatten()
-            .unwrap_or_default();
-        let new = index.entries().iter()
-            .find(|e| e.path(&index).to_str().ok().as_deref() == Some(rel_path.as_str()))
-            .and_then(|e| repo.find_object(e.id).ok())
-            .map(|o| o.data.to_vec())
-            .unwrap_or_default();
-        (old, new)
+        // staged diff: HEAD vs index
+        let head_spec = format!("HEAD:{rel_path}");
+        let idx_spec  = format!(":{rel_path}");
+        (git_show(&head_spec), git_show(&idx_spec))
     } else {
-        let old = index.entries().iter()
-            .find(|e| e.path(&index).to_str().ok().as_deref() == Some(rel_path.as_str()))
-            .and_then(|e| repo.find_object(e.id).ok())
-            .map(|o| o.data.to_vec())
-            .unwrap_or_default();
-        let new = std::fs::read(workdir.join(&rel_path)).unwrap_or_default();
+        // unstaged diff: index vs worktree
+        let idx_spec = format!(":{rel_path}");
+        let old = git_show(&idx_spec);
+        let new = std::fs::read(Path::new(&project_path).join(&rel_path)).unwrap_or_default();
         (old, new)
     };
 
@@ -461,63 +463,118 @@ pub fn git_log(project_path: String, limit: Option<usize>) -> Result<Vec<CommitI
 }
 
 #[tauri::command]
-pub fn git_branches(project_path: String) -> Result<BranchList, AppError> {
-    let repo = open_repo(&project_path)?;
-    let head = repo.head().map_err(|e| AppError::Git(e.to_string()))?;
+pub async fn git_branches(project_path: String) -> Result<BranchList, AppError> {
+    // Run local-branch listing and remote-branch listing in parallel (no gix open).
+    let mut local_cmd = tokio::process::Command::new("git");
+    local_cmd.arg("--no-optional-locks").arg("-C").arg(&project_path)
+        .args(["for-each-ref", "--format=%(HEAD)\t%(refname:short)", "refs/heads/"]);
+    no_window!(local_cmd);
+    let mut remote_cmd = tokio::process::Command::new("git");
+    remote_cmd.arg("--no-optional-locks").arg("-C").arg(&project_path)
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/remotes/"]);
+    no_window!(remote_cmd);
+    let local_fut = local_cmd.output();
+    let remote_fut = remote_cmd.output();
 
-    let (current, is_detached) = match &head.kind {
-        gix::head::Kind::Symbolic(r) => (
-            r.name.shorten().to_str().unwrap_or_default().to_string(),
-            false,
-        ),
-        gix::head::Kind::Detached { target, .. } => {
-            (target.to_string()[..8].to_string(), true)
-        }
-        _ => ("HEAD".to_string(), false),
-    };
+    let (local_res, remote_res) = tokio::join!(local_fut, remote_fut);
+    let local_out = local_res.map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
 
-    let refs = repo.references().map_err(|e| AppError::Git(e.to_string()))?;
+    let mut current = String::new();
+    let mut is_detached = false;
     let mut branches: Vec<BranchInfo> = Vec::new();
 
-    for r in refs.local_branches().map_err(|e| AppError::Git(e.to_string()))?.flatten() {
-        let name = r.name().shorten().to_str().unwrap_or_default().to_string();
-        branches.push(BranchInfo { name, is_remote: false });
+    if local_out.status.success() {
+        for line in String::from_utf8_lossy(&local_out.stdout).lines() {
+            let mut parts = line.splitn(2, '\t');
+            let head_marker = parts.next().unwrap_or("");
+            let name = parts.next().unwrap_or("").trim().to_string();
+            if name.is_empty() { continue; }
+            if head_marker == "*" { current = name.clone(); }
+            branches.push(BranchInfo { name, is_remote: false });
+        }
     }
-    for r in refs.remote_branches().map_err(|e| AppError::Git(e.to_string()))?.flatten() {
-        let name = r.name().shorten().to_str().unwrap_or_default().to_string();
-        branches.push(BranchInfo { name, is_remote: true });
+
+    // Detached HEAD — current is still empty
+    if current.is_empty() {
+        let mut hcmd = tokio::process::Command::new("git");
+        hcmd.arg("--no-optional-locks").arg("-C").arg(&project_path).args(["rev-parse", "--short", "HEAD"]);
+        no_window!(hcmd);
+        if let Ok(out) = hcmd.output().await
+        {
+            if out.status.success() {
+                current = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                is_detached = true;
+            }
+        }
+    }
+
+    if let Ok(remote_out) = remote_res {
+        if remote_out.status.success() {
+            for name in String::from_utf8_lossy(&remote_out.stdout).lines() {
+                let name = name.trim().to_string();
+                if name.is_empty() || name.ends_with("/HEAD") { continue; }
+                branches.push(BranchInfo { name, is_remote: true });
+            }
+        }
     }
 
     Ok(BranchList { current, is_detached, branches })
 }
 
 #[tauri::command]
-pub fn git_remote_status(project_path: String) -> Result<RemoteStatus, AppError> {
-    let repo = open_repo(&project_path)?;
-    let head = repo.head().map_err(|e| AppError::Git(e.to_string()))?;
+pub async fn git_remote_status(project_path: String) -> Result<RemoteStatus, AppError> {
+    // Two parallel calls: branch→remote config, and ahead/behind commit count.
+    // Using git CLI avoids gix rev_walk (expensive pack-file traversal on Windows).
+    let mut config_cmd = tokio::process::Command::new("git");
+    config_cmd.arg("--no-optional-locks").arg("-C").arg(&project_path)
+        .args(["for-each-ref", "--format=%(HEAD)\t%(upstream:remotename)\t%(upstream:short)", "refs/heads/"]);
+    no_window!(config_cmd);
+    let mut ab_cmd = tokio::process::Command::new("git");
+    ab_cmd.arg("--no-optional-locks").arg("-C").arg(&project_path)
+        .args(["rev-list", "--left-right", "--count", "@{u}...HEAD"]);
+    no_window!(ab_cmd);
+    let config_fut = config_cmd.output();
+    let ab_fut = ab_cmd.output();
 
-    let branch_name = match &head.kind {
-        gix::head::Kind::Symbolic(r) => r.name.shorten().to_str().unwrap_or_default().to_string(),
-        _ => return Ok(RemoteStatus { ahead: 0, behind: 0, remote_name: None, remote_branch: None }),
-    };
+    let (config_res, ab_res) = tokio::join!(config_fut, ab_fut);
 
-    let config = repo.config_snapshot();
-    let remote_name = config.string(format!("branch.{branch_name}.remote").as_str()).map(|v| v.to_string());
-    let remote_branch = config.string(format!("branch.{branch_name}.merge").as_str())
-        .map(|v| v.to_string().replace("refs/heads/", ""));
+    let mut remote_name: Option<String> = None;
+    let mut remote_branch: Option<String> = None;
 
-    let (ahead, behind) = if let (Some(ref rn), Some(ref rb)) = (&remote_name, &remote_branch) {
-        let upstream_ref = format!("refs/remotes/{rn}/{rb}");
-        match (repo.head_id(), repo.rev_parse_single(upstream_ref.as_str())) {
-            (Ok(local_id), Ok(upstream)) => {
-                let upstream_id = upstream.detach();
-                let ahead = repo.rev_walk([local_id]).with_pruned([upstream_id])
-                    .all().map_err(|e| AppError::Git(e.to_string()))?.count();
-                let behind = repo.rev_walk([upstream_id]).with_pruned([local_id])
-                    .all().map_err(|e| AppError::Git(e.to_string()))?.count();
-                (ahead, behind)
+    if let Ok(out) = config_res {
+        if out.status.success() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let mut parts = line.splitn(3, '\t');
+                let head_marker = parts.next().unwrap_or("");
+                let rname = parts.next().unwrap_or("").trim().to_string();
+                let rshort = parts.next().unwrap_or("").trim().to_string();
+                if head_marker == "*" {
+                    if !rname.is_empty() {
+                        // rshort is "origin/main" — strip the "origin/" prefix
+                        let branch = if rshort.starts_with(&format!("{rname}/")) {
+                            rshort[rname.len() + 1..].to_string()
+                        } else {
+                            rshort
+                        };
+                        remote_name = Some(rname);
+                        if !branch.is_empty() { remote_branch = Some(branch); }
+                    }
+                    break;
+                }
             }
-            _ => (0, 0),
+        }
+    }
+
+    // `git rev-list --left-right --count @{u}...HEAD` outputs "behind\tahead"
+    let (ahead, behind) = if let Ok(out) = ab_res {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let mut parts = stdout.trim().split('\t');
+            let behind: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let ahead: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            (ahead, behind)
+        } else {
+            (0, 0) // no upstream configured — not an error
         }
     } else {
         (0, 0)
@@ -551,11 +608,10 @@ pub fn git_read_blob_head(project_path: String, rel_path: String) -> Result<Imag
 #[tauri::command]
 pub fn git_read_blob_at_commit(project_path: String, commit_hash: String, rel_path: String) -> Result<ImageBlob, AppError> {
     let spec = format!("{commit_hash}:{rel_path}");
-    let output = Command::new("git")
-        .arg("-C").arg(&project_path)
-        .args(["show", &spec])
-        .output()
-        .map_err(AppError::Io)?;
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(&project_path).args(["show", &spec]);
+    no_window!(cmd);
+    let output = cmd.output().map_err(AppError::Io)?;
     if !output.status.success() {
         return Err(AppError::Git(String::from_utf8_lossy(&output.stderr).trim().to_string()));
     }
@@ -602,11 +658,10 @@ pub fn git_commit(project_path: String, summary: String, body: Option<String>) -
     };
     run_git(&project_path, &["commit", "-m", &message])?;
     // Return the new HEAD hash
-    let out = Command::new("git")
-        .arg("-C").arg(&project_path)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .map_err(|e| AppError::Git(e.to_string()))?;
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(&project_path).args(["rev-parse", "HEAD"]);
+    no_window!(cmd);
+    let out = cmd.output().map_err(|e| AppError::Git(e.to_string()))?;
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
@@ -642,7 +697,7 @@ pub fn git_merge_abort(project_path: String) -> Result<(), AppError> {
 
 #[tauri::command]
 pub fn git_stash(project_path: String) -> Result<(), AppError> {
-    run_git(&project_path, &["stash", "push", "--include-untracked", "-m", "takerest: auto-stash"])
+    run_git(&project_path, &["stash", "push", "--include-untracked", "-m", "anide: auto-stash"])
 }
 
 /// Checkout carrying uncommitted changes to the new branch (git checkout <branch> -- keeps changes).
@@ -678,19 +733,17 @@ pub fn git_delete_branch(project_path: String, branch: String, force: Option<boo
 pub fn git_commit_files(project_path: String, hash: String) -> Result<Vec<FileStatus>, AppError> {
     // Resolve the first parent; fall back to the empty-tree object for initial commits.
     const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-    let parent_out = Command::new("git")
-        .arg("-C").arg(&project_path)
-        .args(["log", "--format=%P", "-n", "1", &hash])
-        .output()
-        .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
+    let mut pcmd = Command::new("git");
+    pcmd.arg("-C").arg(&project_path).args(["log", "--format=%P", "-n", "1", &hash]);
+    no_window!(pcmd);
+    let parent_out = pcmd.output().map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
     let parents_str = String::from_utf8_lossy(&parent_out.stdout);
     let first_parent: &str = parents_str.split_whitespace().next().unwrap_or(EMPTY_TREE);
 
-    let output = Command::new("git")
-        .arg("-C").arg(&project_path)
-        .args(["diff", first_parent, &hash, "--name-status"])
-        .output()
-        .map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
+    let mut dcmd = Command::new("git");
+    dcmd.arg("-C").arg(&project_path).args(["diff", first_parent, &hash, "--name-status"]);
+    no_window!(dcmd);
+    let output = dcmd.output().map_err(|e| AppError::Git(format!("failed to spawn git: {e}")))?;
 
     if !output.status.success() {
         return Err(AppError::Git(String::from_utf8_lossy(&output.stderr).trim().to_string()));
@@ -732,14 +785,10 @@ pub fn git_diff_commit_file(
     let max = max_lines.unwrap_or(10_000);
 
     let read_blob = |spec: String| -> Vec<u8> {
-        Command::new("git")
-            .arg("-C").arg(&project_path)
-            .args(["show", &spec])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| o.stdout)
-            .unwrap_or_default()
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(&project_path).args(["show", &spec]);
+        no_window!(cmd);
+        cmd.output().ok().filter(|o| o.status.success()).map(|o| o.stdout).unwrap_or_default()
     };
 
     let new_bytes = read_blob(format!("{hash}:{rel_path}"));

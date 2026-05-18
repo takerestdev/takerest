@@ -1,7 +1,7 @@
-# takerest
+# anide
 
-> Managed by [TakeRest](https://takerest.dev) — version-controlled developer workspace.
+> Managed by [Anide](https://anide.app) — AI-native developer workspace.
 
 ---
 
-Clone the repo, open TakeRest, point it here. Everything is ready.
+Clone the repo, open Anide, point it here. Everything is ready.

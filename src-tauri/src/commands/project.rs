@@ -13,8 +13,8 @@ use crate::utils::scanner;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
-    /// Whether .takerest/ folder existed (false = we just created it)
-    pub takerest_initialized: bool,
+    /// Whether .anide/ folder existed (false = we just created it)
+    pub anide_initialized: bool,
 
     /// .env file paths relative to project root
     /// Matches any file with ".env" in name: .env, .env.local, .env.production, etc.
@@ -30,7 +30,7 @@ pub struct ProjectInfo {
     /// Dominant file extension in the project, e.g. ".ts", ".py", ".rs"
     pub major_filetype: Option<FiletypeInfo>,
 
-    /// Project metadata from .takerest/README.md, None if not found or invalid
+    /// Project metadata from .anide/README.md, None if not found or invalid
     pub readme_metadata: Option<ReadmeMetadata>,
     
     /// Root README.md content from project root, None if not found
@@ -67,7 +67,7 @@ pub struct ReadmeMetadata {
     pub content: String,
 }
 
-fn init_config_file(takerest_dir: &Path, project_path: &str) -> Result<(), AppError> {
+fn init_config_file(anide_dir: &Path, project_path: &str) -> Result<(), AppError> {
     let project_name = Path::new(project_path)
         .file_name()
         .and_then(|n| n.to_str())
@@ -76,21 +76,21 @@ fn init_config_file(takerest_dir: &Path, project_path: &str) -> Result<(), AppEr
     let content = format!(
         r#"# {project_name}
 
-> Managed by [TakeRest](https://takerest.dev) — version-controlled developer workspace.
+> Managed by [Anide](https://anide.app) — AI-native developer workspace.
 
 ---
 
-Clone the repo, open TakeRest, point it here. Everything is ready.
+Clone the repo, open Anide, point it here. Everything is ready.
 "#
     );
 
-    fs::write(takerest_dir.join("README.md"), content)?;
+    fs::write(anide_dir.join("README.md"), content)?;
     Ok(())
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────
 
-/// Ensures .takerest/ folder exists. Creates it if missing.
+/// Ensures .anide/ folder exists. Creates it if missing.
 /// Returns true if it already existed, false if it was just created.
 #[tauri::command]
 pub fn init_project(project_path: String) -> Result<bool, AppError> {
@@ -102,16 +102,16 @@ pub fn init_project(project_path: String) -> Result<bool, AppError> {
         )));
     }
 
-    let takerest_dir = root.join(".takerest");
-    if takerest_dir.exists() && takerest_dir.is_dir() {
+    let anide_dir = root.join(".anide");
+    if anide_dir.exists() && anide_dir.is_dir() {
         Ok(true)
-    } else if takerest_dir.exists() && !takerest_dir.is_dir() {
+    } else if anide_dir.exists() && !anide_dir.is_dir() {
         Err(AppError::InvalidPath(
-            ".takerest exists but is not a directory".to_string()
+            ".anide exists but is not a directory".to_string()
         ))
     } else {
-        fs::create_dir_all(&takerest_dir)?;
-        init_config_file(&takerest_dir, &project_path)?;
+        fs::create_dir_all(&anide_dir)?;
+        init_config_file(&anide_dir, &project_path)?;
         Ok(false)
     }
 }
@@ -128,8 +128,8 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
         )));
     }
 
-    // Ensure .takerest/ exists
-    let takerest_initialized = init_project(project_path.clone())?;
+    // Ensure .anide/ exists
+    let anide_initialized = init_project(project_path.clone())?;
 
     // Collect results in a single pass
     let mut env_files: Vec<String> = Vec::new();
@@ -155,11 +155,11 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
             Err(_) => continue,
         };
 
-        // Skip files inside .takerest/ — those are our own files
+        // Skip files inside .anide/ — those are our own files
         if Path::new(&rel_path)
             .components()
             .next()
-            .map(|c| c.as_os_str() == OsStr::new(".takerest"))
+            .map(|c| c.as_os_str() == OsStr::new(".anide"))
             .unwrap_or(false)
         {
             continue;
@@ -200,12 +200,12 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
     // Git detection — read .git/HEAD directly (no git2 dependency needed)
     let git = detect_git(root);
 
-    // Read README.md metadata from .takerest/ folder
+    // Read README.md metadata from .anide/ folder
     let readme_metadata = read_readme_metadata(root);
     let root_readme = read_root_readme(root);
 
     Ok(ProjectInfo {
-        takerest_initialized,
+        anide_initialized,
         env_files,
         compose_files,
         git,
@@ -215,7 +215,7 @@ pub fn scan_project(project_path: String) -> Result<ProjectInfo, AppError> {
     })
 }
 
-/// Save the README.md file in .takerest/ folder
+/// Save README.md to the project root.
 #[tauri::command]
 pub fn save_readme(project_path: String, content: String) -> Result<(), AppError> {
     
@@ -329,9 +329,9 @@ fn read_root_readme(root: &Path) -> Option<String> {
     fs::read_to_string(&readme_path).ok()
 }
 
-/// Read and parse the .takerest/README.md file for project metadata.
+/// Read and parse the .anide/README.md file for project metadata.
 fn read_readme_metadata(root: &Path) -> Option<ReadmeMetadata> {
-    let readme_path = root.join(".takerest").join("README.md");
+    let readme_path = root.join(".anide").join("README.md");
     
     if !readme_path.is_file() {
         return None;
