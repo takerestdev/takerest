@@ -3,17 +3,33 @@
   import { onMount } from 'svelte';
   import { workspace } from '$lib/stores/workspace.svelte.js';
   import { terminalListShells } from '$lib/commands/terminal.js';
-  import { Terminal, Plus, ChevronDown } from '@lucide/svelte';
+  import { Terminal, Plus, ChevronDown, Trash2 } from '@lucide/svelte';
+  import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
+  import { Input } from '$lib/components/ui/input/index.js';
 
   let terminalTabs = $derived(workspace.tabs.filter(t => t.type === 'terminal'));
 
   let shells = $state([]);
   let dropdownOpen = $state(false);
 
+  // Kill confirmation
+  let killTarget = $state(null);
+  let killOpen = $state(false);
+
+  // Inline rename
+  let renamingId = $state(null);
+  let renameValue = $state('');
+  let renameInputRef = $state(null);
+
+  $effect(() => {
+    if (renamingId && renameInputRef) {
+      renameInputRef.focus();
+      renameInputRef.select();
+    }
+  });
+
   onMount(async () => {
-    try {
-      shells = await terminalListShells();
-    } catch {}
+    try { shells = await terminalListShells(); } catch {}
   });
 
   function openTerminal(shell = null) {
@@ -24,24 +40,48 @@
       id: `terminal-${sessionId}`,
       type: 'terminal',
       title,
-      data: {
-        sessionId,
-        cwd: workspace.folderPath,
-        shell: shell?.program ?? null,
-        shellArgs: shell?.args ?? null,
-      },
+      data: { sessionId, cwd: workspace.folderPath, shell: shell?.program ?? null, shellArgs: shell?.args ?? null },
     });
     dropdownOpen = false;
   }
+
+  function openKill(tab) {
+    killTarget = tab;
+    killOpen = true;
+  }
+
+  function confirmKill() {
+    if (killTarget) workspace.closeTab(killTarget.id);
+    killTarget = null;
+    killOpen = false;
+  }
+
+  function startRename(tab) {
+    renamingId = tab.id;
+    renameValue = tab.title;
+  }
+
+  function saveRename() {
+    if (renamingId && renameValue.trim()) {
+      workspace.renameTab(renamingId, renameValue.trim());
+    }
+    renamingId = null;
+    renameValue = '';
+  }
+
+  function handleRenameKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); saveRename(); }
+    if (e.key === 'Escape') { renamingId = null; renameValue = ''; }
+  }
+
+
 </script>
 
 <div class="flex flex-col h-full">
 
-  <!-- New Terminal button row -->
+  <!-- New Terminal split button -->
   <div class="px-2 py-2 shrink-0 relative">
     <div class="flex items-stretch gap-px">
-
-      <!-- Main "New Terminal" button — opens with first/default shell -->
       <button
         type="button"
         onclick={() => openTerminal(shells[0] ?? null)}
@@ -51,8 +91,6 @@
         <Plus size={12} />
         New Terminal
       </button>
-
-      <!-- Chevron — opens shell picker -->
       <button
         type="button"
         aria-label="Pick shell"
@@ -65,7 +103,6 @@
       </button>
     </div>
 
-    <!-- Shell picker dropdown -->
     {#if dropdownOpen}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="fixed inset-0 z-40" onclick={() => (dropdownOpen = false)}></div>
@@ -89,20 +126,52 @@
     {/if}
   </div>
 
-  <!-- Open terminals list -->
+  <!-- Terminal list -->
   <div class="flex-1 overflow-y-auto">
     {#each terminalTabs as tab (tab.id)}
-      <button
-        type="button"
-        onclick={() => { workspace.activeTabId = tab.id; }}
-        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors
-          {workspace.activeTabId === tab.id
-            ? 'bg-muted text-foreground'
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}"
+      {@const isActive = workspace.activeTabId === tab.id}
+      {@const isRenaming = renamingId === tab.id}
+
+      <div
+        role="none"
+        class="group flex items-center gap-1 pr-1 transition-colors
+          {isActive ? 'bg-muted' : 'hover:bg-muted/50'}"
       >
-        <Terminal size={12} class="shrink-0" />
-        <span class="flex-1 truncate">{tab.title}</span>
-      </button>
+        {#if isRenaming}
+          <span class="pl-3 text-muted-foreground flex items-center shrink-0 py-2">
+            <Terminal size={12} />
+          </span>
+          <Input
+            bind:ref={renameInputRef}
+            type="text"
+            bind:value={renameValue}
+            onblur={saveRename}
+            onkeydown={handleRenameKey}
+            class="flex-1 h-6 text-xs px-1.5 py-0 my-1.5"
+          />
+        {:else}
+          <button
+            type="button"
+            onclick={() => { workspace.activeTabId = tab.id; }}
+            ondblclick={() => startRename(tab)}
+            class="flex-1 flex items-center gap-2 pl-3 py-2 text-xs text-left min-w-0 transition-colors
+              {isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'}"
+          >
+            <Terminal size={12} class="shrink-0" />
+            <span class="truncate">{tab.title}</span>
+          </button>
+        {/if}
+
+        <button
+          type="button"
+          aria-label="Kill terminal"
+          onclick={() => openKill(tab)}
+          class="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity
+            text-muted-foreground hover:text-destructive"
+        >
+          <Trash2 size={11} />
+        </button>
+      </div>
     {/each}
 
     {#if terminalTabs.length === 0}
@@ -114,3 +183,24 @@
   </div>
 
 </div>
+
+<!-- Kill confirmation dialog -->
+<AlertDialog.Root bind:open={killOpen}>
+  <AlertDialog.Content class="sm:max-w-sm">
+    <AlertDialog.Header>
+      <AlertDialog.Title>Kill terminal?</AlertDialog.Title>
+      <AlertDialog.Description>
+        This will kill the <span class="font-mono text-foreground">{killTarget?.title}</span> process and close the tab.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        onclick={confirmKill}
+      >
+        Kill Terminal
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

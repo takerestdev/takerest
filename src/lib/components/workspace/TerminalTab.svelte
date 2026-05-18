@@ -15,6 +15,7 @@
 
   let containerEl = $state(null);
 
+  let _mounted = true;
   let _term = null;
   let _fit = null;
   let _webgl = null;
@@ -44,7 +45,7 @@
       allowProposedApi: true,
       fontFamily: '"Geist Mono", "Cascadia Code", Consolas, "Courier New", monospace',
       fontSize: 13,
-      lineHeight: 1.2,
+      lineHeight: 1.0,
       letterSpacing: 0,
       cursorBlink: true,
       cursorStyle: 'block',
@@ -94,34 +95,41 @@
       const bytes = Uint8Array.from(atob(event.payload), c => c.charCodeAt(0));
       _term.write(bytes);
     });
+    if (!_mounted) { _unlistenData(); return; }
 
     _unlistenExit = await listen(`terminal:exit:${data.sessionId}`, () => {
       _term.write('\r\n\x1b[90m[process exited]\x1b[0m\r\n');
     });
+    if (!_mounted) { _unlistenData(); _unlistenExit(); return; }
 
     try {
       await terminalCreate(data.sessionId, data.cwd || null, _term.cols, _term.rows, data.shell ?? null, data.shellArgs ?? null);
     } catch (err) {
-      _term.write(`\r\n\x1b[31mFailed to start shell: ${err}\x1b[0m\r\n`);
+      if (_mounted) _term.write(`\r\n\x1b[31mFailed to start shell: ${err}\x1b[0m\r\n`);
     }
+    // onDestroy may have fired during the awaits above; if so, the PTY session
+    // was created but never cleaned up (close() ran before the session existed).
+    if (!_mounted) { terminalClose(data.sessionId).catch(() => {}); return; }
 
     // Fire-and-forget writes for zero input lag — no await, no queuing
     _term.onData(input => {
-      terminalWrite(data.sessionId, input);
+      if (!_mounted) return;
+      terminalWrite(data.sessionId, input).catch(() => {});
     });
 
     // Refit + notify backend whenever the container is resized
     _ro = new ResizeObserver(() => {
       requestAnimationFrame(() => {
-        if (!_fit || !_term) return;
+        if (!_mounted || !_fit || !_term) return;
         _fit.fit();
-        terminalResize(data.sessionId, _term.cols, _term.rows);
+        terminalResize(data.sessionId, _term.cols, _term.rows).catch(() => {});
       });
     });
     _ro.observe(containerEl);
   });
 
   onDestroy(() => {
+    _mounted = false;
     _themeObserver?.disconnect();
     _ro?.disconnect();
     _unlistenData?.();
@@ -136,7 +144,7 @@
     if (workspace.activeTabId === tabId && _fit && _term) {
       requestAnimationFrame(() => {
         _fit?.fit();
-        if (_term) terminalResize(data.sessionId, _term.cols, _term.rows);
+        if (_term) terminalResize(data.sessionId, _term.cols, _term.rows).catch(() => {});
       });
     }
   });

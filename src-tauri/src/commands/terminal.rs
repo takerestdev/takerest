@@ -256,14 +256,13 @@ pub fn terminal_create(
         }
     });
 
-    state.sessions.lock().unwrap().insert(
+    let mut sessions = state.sessions.lock().unwrap();
+    if sessions.contains_key(&session_id) {
+        return Err(format!("session already exists: {session_id}"));
+    }
+    sessions.insert(
         session_id,
-        PtySession {
-            master: pair.master,
-            writer,
-            child,
-            alive,
-        },
+        PtySession { master: pair.master, writer, child, alive },
     );
 
     Ok(())
@@ -276,13 +275,10 @@ pub fn terminal_write(
     data: String,
 ) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
-    if let Some(session) = sessions.get_mut(&session_id) {
-        session
-            .writer
-            .write_all(data.as_bytes())
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| format!("session not found: {session_id}"))?;
+    session.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -293,18 +289,13 @@ pub fn terminal_resize(
     rows: u16,
 ) -> Result<(), String> {
     let sessions = state.sessions.lock().unwrap();
-    if let Some(session) = sessions.get(&session_id) {
-        session
-            .master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("session not found: {session_id}"))?;
+    session
+        .master
+        .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

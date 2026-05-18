@@ -84,6 +84,11 @@ function createWorkspace() {
       }
     },
 
+    renameTab(id, title) {
+      const tab = tabs.find(t => t.id === id);
+      if (tab) tab.title = title;
+    },
+
     refreshEnvFiles() {
       envFilesVersion++;
     },
