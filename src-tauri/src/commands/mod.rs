@@ -5,6 +5,7 @@ pub mod git;
 pub mod watcher;
 pub mod docker;
 pub mod files;
+pub mod terminal;
 // pub mod db;  // future
 // pub mod kv;  // future
 // pub mod s3;  // future

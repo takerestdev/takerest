@@ -14,6 +14,7 @@
     Minus, Square, X,
     Globe, Database, KeySquare, Box, GitBranch, Container, Braces,
     FileText, FileKey, PanelLeftClose, BookOpen, FolderOpen, Gamepad2,
+    Terminal,
   } from '@lucide/svelte';
 
   import Logo from '$lib/components/logo.svelte';
@@ -29,6 +30,7 @@
   import GitPanel from '$lib/components/panels/GitPanel.svelte';
   import DockerPanel from '$lib/components/panels/DockerPanel.svelte';
   import DocsPanel from '$lib/components/panels/DocsPanel.svelte';
+  import TerminalPanel from '$lib/components/panels/TerminalPanel.svelte';
   import StubPanel from '$lib/components/panels/StubPanel.svelte';
   import ReadmeTab from '$lib/components/workspace/ReadmeTab.svelte';
   import EnvTab from '$lib/components/workspace/EnvTab.svelte';
@@ -36,6 +38,7 @@
   import ImageDiffTab from '$lib/components/workspace/ImageDiffTab.svelte';
   import CommitTab from '$lib/components/workspace/CommitTab.svelte';
   import DockerLogsTab from '$lib/components/workspace/DockerLogsTab.svelte';
+  import TerminalTab from '$lib/components/workspace/TerminalTab.svelte';
   import FileTab from '$lib/components/workspace/FileTab.svelte';
   import DocTab from '$lib/components/workspace/DocTab.svelte';
   import TicTacToe from '$lib/components/TicTacToe.svelte';
@@ -155,8 +158,9 @@
   });
 
   const toolItems = [
-    { id: 'docs',   icon: BookOpen,   label: 'Docs' },
-    { id: 'api',    icon: Globe,      label: 'API' },
+    { id: 'docs',     icon: BookOpen,  label: 'Docs' },
+    { id: 'terminal', icon: Terminal,  label: 'Terminal' },
+    { id: 'api',      icon: Globe,     label: 'API' },
     { id: 'db',     icon: Database,   label: 'Database' },
     { id: 'kv',     icon: Braces,     label: 'Cache' },
     { id: 's3',     icon: Box,        label: 'Storage' },
@@ -166,18 +170,19 @@
   ];
 
   const panelLabels = {
-    docs: 'Docs', api: 'API Requests', db: 'Databases', kv: 'Cache',
+    docs: 'Docs', terminal: 'Terminal', api: 'API Requests', db: 'Databases', kv: 'Cache',
     s3: 'Storage', git: 'Git', docker: 'Docker', env: 'Env Files',
   };
 
-  import { GitBranch as GitBranchIcon, GitCommit, Terminal as TerminalIcon, FileCode } from '@lucide/svelte';
+  import { GitBranch as GitBranchIcon, GitCommit, FileCode } from '@lucide/svelte';
   const tabTypeIcons = {
     readme: FileText,
     doc: BookOpen,
     'env-file': FileKey,
     'git-diff': GitBranchIcon,
     'git-commit': GitCommit,
-    'docker-logs': TerminalIcon,
+    'docker-logs': Terminal,
+    'terminal': Terminal,
     'file-edit': FileCode,
   };
 
@@ -332,6 +337,8 @@
           <div class="flex-1 overflow-hidden">
             {#if workspace.activeTool === 'docs'}
               <DocsPanel />
+            {:else if workspace.activeTool === 'terminal'}
+              <TerminalPanel />
             {:else if workspace.activeTool === 'env'}
               <EnvPanel />
             {:else if workspace.activeTool === 'api'}
@@ -447,6 +454,8 @@
             <CommitTab data={tab.data} />
           {:else if tab.type === 'docker-logs'}
             <DockerLogsTab data={tab.data} tabId={tab.id} />
+          {:else if tab.type === 'terminal'}
+            <TerminalTab data={tab.data} tabId={tab.id} />
           {:else if tab.type === 'file-edit'}
             <FileTab data={tab.data} tabId={tab.id} />
           {/if}

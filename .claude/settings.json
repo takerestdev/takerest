@@ -7,7 +7,8 @@
       "PowerShell(npx shadcn-svelte@latest add context-menu 2>&1)",
       "Bash(node -e \"const m = require\\('./node_modules/@tauri-apps/plugin-opener/dist-cjs/index.cjs'\\); console.log\\(Object.keys\\(m\\)\\)\")",
       "Bash(xargs grep -l \"checkbox\")",
-      "Bash(grep -n -A 30 'props = $derived' node_modules/bits-ui/dist/bits/checkbox/checkbox.svelte.js)"
+      "Bash(grep -n -A 30 'props = $derived' node_modules/bits-ui/dist/bits/checkbox/checkbox.svelte.js)",
+      "Bash(Get-ChildItem -Path \"d:\\\\takerest\\\\gits\\\\takerest\" -Force)"
     ]
   }
 }

@@ -36,4 +36,5 @@ notify-debouncer-full = "0.5"
 bollard = "0.18"
 futures-util = "0.3"
 tokio = { version = "1", features = ["process", "io-util", "time", "macros"] }
+portable-pty = "0.8"
 
