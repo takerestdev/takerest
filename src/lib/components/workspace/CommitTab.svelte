@@ -247,7 +247,10 @@
 
   // ── Scroll handler + active file tracking ──────────────────────────────────
   let _rafId = null;
-  $effect(() => () => { if (_rafId) cancelAnimationFrame(_rafId); });
+  $effect(() => () => {
+    if (_rafId) cancelAnimationFrame(_rafId);
+    if (_pendingScrollTimer) { clearTimeout(_pendingScrollTimer); _pendingScrollTimer = null; }
+  });
 
   function onScroll(e) {
     const st = e.currentTarget.scrollTop;
