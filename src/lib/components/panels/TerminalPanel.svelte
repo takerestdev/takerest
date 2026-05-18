@@ -110,7 +110,7 @@
         {#if shells.length === 0}
           <p class="px-3 py-2 text-xs text-muted-foreground">No shells detected</p>
         {:else}
-          {#each shells as shell (shell.program)}
+          {#each shells as shell (`${shell.program}-${(shell.args ?? []).join(',')}-${shell.name}`)}
             <button
               type="button"
               onclick={() => openTerminal(shell)}
