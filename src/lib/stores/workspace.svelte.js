@@ -84,6 +84,13 @@ function createWorkspace() {
       }
     },
 
+    renameTab(id, title) {
+      const tab = tabs.find(t => t.id === id);
+      if (!tab) return;
+      const trimmed = title.trim();
+      tab.title = trimmed || tab.title;
+    },
+
     refreshEnvFiles() {
       envFilesVersion++;
     },

@@ -3,6 +3,7 @@ mod error;
 mod utils;
 
 use commands::docker::{DockerEventState, DockerStreamState};
+use commands::terminal::TerminalState;
 use commands::watcher::WatcherState;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,7 @@ pub fn run() {
         .manage(WatcherState(Mutex::new(None), Arc::new(AtomicU64::new(0))))
         .manage(DockerStreamState::new())
         .manage(DockerEventState::new())
+        .manage(TerminalState::new())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -102,6 +104,12 @@ pub fn run() {
             commands::docker::docker_watch_events,
             commands::docker::docker_stop_watch_events,
             commands::docker::docker_exec_cmd,
+            // terminal commands
+            commands::terminal::terminal_list_shells,
+            commands::terminal::terminal_create,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_close,
         ])
         .setup(|app| {
             // Warm up the Docker connection in the background so the first
