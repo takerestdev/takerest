@@ -391,35 +391,26 @@ pub fn git_diff_file(
     max_lines: Option<usize>,
 ) -> Result<DiffResult, AppError> {
     let max = max_lines.unwrap_or(10_000);
-    let repo = open_repo(&project_path)?;
-    let workdir = repo.work_dir().ok_or_else(|| AppError::Git("bare repository".into()))?.to_path_buf();
-    let index = repo.open_index().map_err(|e| AppError::Git(e.to_string()))?;
+
+    // Use git CLI to read blob content — avoids gix open_index() which fails
+    // on Windows for repos with large or locked indexes.
+    let git_show = |spec: &str| -> Vec<u8> {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(&project_path).args(["show", spec]);
+        no_window!(cmd);
+        cmd.output().map(|o| if o.status.success() { o.stdout } else { vec![] }).unwrap_or_default()
+    };
 
     let (old_bytes, new_bytes): (Vec<u8>, Vec<u8>) = if staged {
-        let old = repo.head_commit().ok()
-            .and_then(|c| c.tree().ok())
-            .map(|tree| {
-                let mut m = BTreeMap::new();
-                collect_tree_entries(&repo, &tree, "", &mut m).ok();
-                m.get(&rel_path)
-                    .and_then(|&oid| repo.find_object(oid).ok())
-                    .map(|o| o.data.to_vec())
-            })
-            .flatten()
-            .unwrap_or_default();
-        let new = index.entries().iter()
-            .find(|e| e.path(&index).to_str().ok().as_deref() == Some(rel_path.as_str()))
-            .and_then(|e| repo.find_object(e.id).ok())
-            .map(|o| o.data.to_vec())
-            .unwrap_or_default();
-        (old, new)
+        // staged diff: HEAD vs index
+        let head_spec = format!("HEAD:{rel_path}");
+        let idx_spec  = format!(":{rel_path}");
+        (git_show(&head_spec), git_show(&idx_spec))
     } else {
-        let old = index.entries().iter()
-            .find(|e| e.path(&index).to_str().ok().as_deref() == Some(rel_path.as_str()))
-            .and_then(|e| repo.find_object(e.id).ok())
-            .map(|o| o.data.to_vec())
-            .unwrap_or_default();
-        let new = std::fs::read(workdir.join(&rel_path)).unwrap_or_default();
+        // unstaged diff: index vs worktree
+        let idx_spec = format!(":{rel_path}");
+        let old = git_show(&idx_spec);
+        let new = std::fs::read(Path::new(&project_path).join(&rel_path)).unwrap_or_default();
         (old, new)
     };
 
