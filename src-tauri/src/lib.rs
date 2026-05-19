@@ -129,7 +129,7 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             let win_builder = win_builder.decorations(false);
 
-            let _window = win_builder.build()?;
+            let window = win_builder.build()?;
 
             #[cfg(target_os = "windows")]
             apply_acrylic(&window, Some((18, 18, 18, 125)))
@@ -138,6 +138,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
                 .expect("Failed to apply vibrancy effect");
+
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            let _ = window;
 
             Ok(())
         })

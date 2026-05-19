@@ -6,15 +6,20 @@ use std::time::Duration;
 use notify_debouncer_full::{
     new_debouncer,
     notify::{RecommendedWatcher, RecursiveMode},
-    DebounceEventResult, Debouncer, FileIdMap,
+    DebounceEventResult, Debouncer, FileIdCache, FileIdMap, NoCache,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::error::AppError;
 
+#[cfg(target_os = "linux")]
+type DebouncerCache = NoCache;
+#[cfg(not(target_os = "linux"))]
+type DebouncerCache = FileIdMap;
+
 pub struct WatcherState(
-    pub Mutex<Option<Debouncer<RecommendedWatcher, FileIdMap>>>,
+    pub Mutex<Option<Debouncer<RecommendedWatcher, DebouncerCache>>>,
     pub Arc<AtomicU64>,
 );
 
@@ -66,9 +71,9 @@ fn is_skip_dir(name: &str) -> bool {
 }
 
 // Selective watch: root non-recursive + each non-skip depth-1 dir recursive.
-// This avoids FileIdMap scanning node_modules / target which can have 100k+ files,
+// This avoids NoCache scanning node_modules / target which can have 100k+ files,
 // while ensuring new subdirectories created under watched dirs are picked up.
-fn setup_watches(debouncer: &mut Debouncer<RecommendedWatcher, FileIdMap>, root: &Path) {
+fn setup_watches<C: FileIdCache>(debouncer: &mut Debouncer<RecommendedWatcher, C>, root: &Path) {
     // Root itself (non-recursive) — catches root-level file changes
     let _ = debouncer.watch(root, RecursiveMode::NonRecursive);
 
@@ -112,7 +117,7 @@ pub fn watch_project(
         let app_for_events = app_clone.clone();
         let gen_for_events = Arc::clone(&gen_arc);
 
-        let debouncer_result: Result<Debouncer<RecommendedWatcher, FileIdMap>, _> = new_debouncer(
+        let debouncer_result = new_debouncer(
             Duration::from_millis(250),
             None,
             move |result: DebounceEventResult| {
