@@ -10,7 +10,8 @@
       "Bash(bun run preview)",
       "Bash(bun run check)",
       "Bash(bun run check:watch)",
-      "Bash(bun run tauri)"
+      "Bash(bun run tauri)",
+      "Bash(gh repo *)"
     ]
   }
 }
