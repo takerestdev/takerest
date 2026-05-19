@@ -12,8 +12,14 @@ export async function checkForUpdates() {
 			action: {
 				label: "Install & Restart",
 				onClick: async () => {
-					await update.downloadAndInstall();
-					await relaunch();
+					try {
+						await update.downloadAndInstall();
+						await relaunch();
+					} catch (e) {
+						toast.error("Update failed", {
+							description: e instanceof Error ? e.message : "Could not install update.",
+						});
+					}
 				},
 			},
 			duration: Infinity,
