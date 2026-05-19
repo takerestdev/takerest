@@ -18,6 +18,8 @@
     "core:window:allow-set-background-color",
     "dialog:allow-open",
     "core:webview:allow-create-webview-window",
-    "os:default"
+    "os:default",
+    "updater:default",
+    "process:allow-relaunch"
   ]
 }

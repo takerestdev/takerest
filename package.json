@@ -22,6 +22,8 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-os": "^2.3.2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@tiptap/core": "^3.22.5",
     "@tiptap/extension-bubble-menu": "^3.22.5",
     "@tiptap/extension-code-block-lowlight": "^3.22.5",
