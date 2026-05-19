@@ -20,6 +20,6 @@
     "core:webview:allow-create-webview-window",
     "os:default",
     "updater:default",
-    "process:allow-relaunch"
+    "process:allow-restart"
   ]
 }
