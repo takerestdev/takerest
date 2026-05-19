@@ -112,7 +112,7 @@ pub fn watch_project(
         let app_for_events = app_clone.clone();
         let gen_for_events = Arc::clone(&gen_arc);
 
-        let debouncer_result = new_debouncer(
+        let debouncer_result: Result<Debouncer<RecommendedWatcher, FileIdMap>, _> = new_debouncer(
             Duration::from_millis(250),
             None,
             move |result: DebounceEventResult| {

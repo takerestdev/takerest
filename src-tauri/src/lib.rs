@@ -121,8 +121,7 @@ pub fn run() {
 
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Anide")
-                .inner_size(1200.0, 800.0)
-                .transparent(true);
+                .inner_size(1200.0, 800.0);
 
             #[cfg(target_os = "macos")]
             let win_builder = win_builder.title_bar_style(TitleBarStyle::Transparent);
@@ -130,7 +129,7 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             let win_builder = win_builder.decorations(false);
 
-            let window = win_builder.build()?;
+            let _window = win_builder.build()?;
 
             #[cfg(target_os = "windows")]
             apply_acrylic(&window, Some((18, 18, 18, 125)))
