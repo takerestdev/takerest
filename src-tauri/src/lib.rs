@@ -8,6 +8,7 @@ use commands::watcher::WatcherState;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use tauri::{WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "windows")]
 use window_vibrancy::apply_acrylic;
 
 #[cfg(target_os = "macos")]
