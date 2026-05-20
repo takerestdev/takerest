@@ -1,18 +1,93 @@
-# anide.app
+# Anide
 
-One app. Every tool a developer needs daily.
-
-Stop juggling Postman, DBeaver, Redis Insight, MinIO Browser, GitHub Desktop, and Docker Desktop. Anide puts all of them in a single native desktop app — built on Tauri/Rust, not Electron. Everything is stored in a `.anide/` folder at your repo root, versioned alongside your code. No accounts. No cloud sync. Credentials stay on your machine.
+The AI-native IDE. The AI writes. You ship.
 
 ---
 
-## Why
+You are the senior engineer. The AI is the contributor. Run Claude Code, Codex, Grok, or any AI CLI in Anide's terminal. Every file the agent touches surfaces as a Git diff. You review, decide, and commit what's right. Nothing auto-commits.
 
-- **Too many apps eating RAM** — six tools open means six Electron processes running in the background
-- **Context switching kills flow** — alt-tabbing between tools breaks concentration constantly
-- **Sharing configs is painful** — every teammate has their own Postman setup, nothing is in sync
-- **Credentials leaving your machine** — cloud-synced workspaces mean your API keys and DB passwords live on someone else's server
-- **Nothing talks to each other** — every tool is a silo; your API client has no idea what's in your `.env`
+---
+
+## How it works
+
+1. **Plan &amp; describe** - open a terminal in Anide, tell the AI what to build
+2. **AI executes** - the agent writes code, edits files, runs commands
+3. **Diff appears** - every changed file surfaces in Git with a full diff
+4. **Test &amp; review** - use Anide's tools to hit the endpoint, query the DB, check logs
+5. **Commit &amp; ship** - approve what's right, discard what isn't
+
+---
+
+## Your AI sees the whole stack
+
+Most AI coding tools only see the open file. Anide is designed to give your agent live context from every layer of your stack via MCP.
+
+Git and Docker ship today. MCP shipping soon. The remaining providers are on the roadmap - built as Anide grows:
+
+
+| Provider                   | What the agent can see                      |
+| -------------------------- | ------------------------------------------- |
+| Git                        | current diff, branch, commit history        |
+| Docker                     | running containers, logs, port mappings     |
+| Database *(planned)*       | live schema, table structure, query results |
+| API client *(planned)*     | saved requests, response history            |
+| Cache *(planned)*          | key/TTL state, pub/sub channels             |
+| Object Storage *(planned)* | bucket contents, file metadata              |
+
+
+The agent checks what's actually running before it writes a line. No guessing from stale docs.
+
+---
+
+## Review first
+
+Every change the agent makes is a file on disk. Anide's Git tool shows you the full diff before anything is committed. You decide what ships. There is no auto-commit, no silent overwrite.
+
+---
+
+## Local first
+
+- Runs entirely on your machine
+- No telemetry, no analytics, no tracking
+- No mandatory account or cloud sync
+- Credentials never leave your disk and they are stored in `.env` at your repo .gitignore -d
+
+```text
+your-project/
+├── .anide/
+│   ├── README.md          ← project notes, editable in-app
+│   └── ...
+├── .env
+└── ...
+```
+
+---
+
+## Built on Tauri
+
+- **&lt; 1s startup** - native OS WebView, no bundled Chromium
+- **~8.3 MB binary** - dramatically smaller than Electron alternatives
+- **&lt; 30MB RAM usage** - Uses less than 30 mb of RAM while running
+- **Rust backend** - memory-safe, no GC pauses
+- **Stack:** Svelte 5, SvelteKit 2, Tailwind CSS 4, Tauri 2, CodeMirror 6, Bun
+
+---
+
+## Also replaces
+
+Anide's tools are primarily MCP context providers for your agent. But you can drive them yourself too — without switching apps.
+
+What is there today:
+
+- **Git** — stage, diff, commit, branch, push, pull, history
+- **Docker** — start/stop containers, stream logs, exec in, compose up/down
+
+What's coming:
+
+- **Database** — query, browse schema, edit rows (replaces DBeaver, TablePlus)
+- **REST client** — send requests, manage collections (replaces Postman, Insomnia)
+- **Cache** — browse keys, debug pub/sub (replaces Redis Insight)
+- **Object Storage** — browse buckets, upload, download (replaces MinIO Browser, Cyberduck)
 
 ---
 
@@ -82,15 +157,6 @@ Replaces: Docker Desktop, Lazydocker
 
 ---
 
-## Stack
-
-- **Frontend** — Svelte 5, SvelteKit 2, Tailwind CSS 4, shadcn-svelte
-- **Backend** — Rust, Tauri 2
-- **Editor** — CodeMirror 6, Tiptap 3
-- **Package manager** — Bun
-
----
-
 ## Dev
 
 ```bash
@@ -106,22 +172,16 @@ bun run tauri build
 
 ---
 
-## How it works
+## License
 
-Opening a project creates a `.anide/` folder at the repo root. All your requests, notes, and config live there as plain files — readable, diffable, and committed to Git with the rest of your code.
-
-```text
-your-project/
-├── .anide/
-│   ├── README.md          ← project notes, editable in-app
-│   └── api/               ← saved requests (coming soon)
-├── .env
-├── .env.local
-└── ...
-```
-
-Pull requests get richer. Onboarding gets faster. Your API keys never leave your machine.
+Apache 2.0 — see [./LICENSE](./LICENSE).
 
 ---
 
-> [anide.app](https://anide.app) · Built with Svelte + Tauri
+## Contributing
+
+Issues are welcome. Pull requests are restricted to collaborators - this is a solo project with a focused vision.
+
+---
+
+> [anide.app](https://anide.app)
