@@ -1,0 +1,55 @@
+name: macOS Debug
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-launch:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-13'        # Intel — matches your crash report
+            target: 'x86_64-apple-darwin'
+          - platform: 'macos-latest'    # Apple Silicon — check if arm crashes too
+            target: 'aarch64-apple-darwin'
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Build app (no release)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bunx tauri build --target ${{ matrix.target }} --verbose
+
+      - name: Launch binary and capture panic
+        run: |
+          APP=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name "*.app" -maxdepth 3 | head -n1)
+          BIN="$APP/Contents/MacOS/$(ls "$APP/Contents/MacOS" | head -n1)"
+          echo "Running: $BIN"
+          echo "----- APP LAUNCH OUTPUT -----"
+          RUST_BACKTRACE=full timeout 25 "$BIN" 2>&1 | tee panic.log || true
+          echo "----- END OUTPUT -----"
+
+      - name: Upload panic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panic-log-${{ matrix.target }}
+          path: panic.log
