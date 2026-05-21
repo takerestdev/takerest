@@ -44,7 +44,12 @@ jobs:
           BIN="$APP/Contents/MacOS/$(ls "$APP/Contents/MacOS" | head -n1)"
           echo "Running: $BIN"
           echo "----- APP LAUNCH OUTPUT -----"
-          RUST_BACKTRACE=full timeout 25 "$BIN" 2>&1 | tee panic.log || true
+          RUST_BACKTRACE=full "$BIN" > panic.log 2>&1 &
+          PID=$!
+          sleep 20
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          cat panic.log
           echo "----- END OUTPUT -----"
 
       - name: Upload panic log
